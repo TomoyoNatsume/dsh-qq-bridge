@@ -64,7 +64,11 @@ export default function (options: DshQqBridgeConfig) {
         )
       }
 
-      await client.connect()
+      await client.connect().catch((err) => {
+        // 连接健康检查失败:给出对 Agent/用户可执行的指引,而不是沉默失败
+        const guidance = buildConnectGuidance(cfg, err)
+        return Promise.reject(new Error(guidance))
+      })
       const unsubMessages = client.onMessage((evt: OnebotMessageEvent) => {
         void router.route(evt)
       })
@@ -142,4 +146,19 @@ function workdir(): string {
   } catch {
     return '.'
   }
+}
+
+/** 构建连接失败时的引导文案,指向「给 Agent 的 NapCat 安装向导」。 */
+export function buildConnectGuidance(cfg: DshQqBridgeConfig, err: unknown): string {
+  const reason = err instanceof Error ? err.message : String(err)
+  return [
+    `[dsh-qq-bridge] 无法连接 onebot WS 端点: ${cfg.napcat.wsUrl}`,
+    `原因: ${reason}`,
+    ``,
+    `请按以下步骤让 QQ 接入(NapCat 是一侧部署,插件只负责连接):`,
+    `1. 阅读给 Agent 的安装向导:${cfg.napcat.guideDoc ?? 'docs/agent-napcat-guide.md'}`,
+    `2. 若尚未安装 NapCat,引导用户在官方 GitHub (NapNeko/NapCatQQ) 下载并扫码登录专属小号。`,
+    `3. 启用正向 WebSocket,核对端口与 wsUrl(${cfg.napcat.wsUrl})一致。`,
+    `4. 连接成功后,从主号向机器人小号发送「/dsh ping」验证双向通信。`,
+  ].join('\n')
 }

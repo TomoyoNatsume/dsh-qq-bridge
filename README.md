@@ -38,9 +38,20 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 
 - **M0** 架构/部署/接口定稿 ✅
 - **M1** 工程骨架 + OneBot client + router + security + 本地单测 ✅
-- **M2** 接通 DSH `agentLoop` + `sessionQuery`,驱动 Agent 并读取回复 ✅
-- **M3** 常驻 live agent 实现多轮上下文(每 QQ 会话一个 DSH agent),per-key 串行,teardown 释放 ✅
-- **M4** 装 NapCat + 接入真实小号,QQ→DSH→回发闭环
+- **M2** 接通 DSH `agentLoop` + `sessionQuery` 驱动 Agent ✅
+- **M3** 常驻 live agent 实现多轮上下文 ✅
+- **M4** 连接健康检查 + 给 Agent 的 NapCat 安装向导(`docs/agent-napcat-guide.md`)✅
+- **M5** 真实小号端到端验证(QQ→DSH→回发,需实机)
+- **M6** 完善文档/示例,发布并申报进 dsh-plugin 社区
+
+## NapCat 部署策略(方案 1)
+
+插件本体**不负责也不打包** NapCat,只依赖一个 onebot WS 端点。NapCat 由用户按需安装:
+
+- 插件启动时健康检查:连不上 `wsUrl` 会给出指向 **`docs/agent-napcat-guide.md`** 的引导。
+- 该文档是**给 AI Agent 看的安装向导**:Agent 据此一步步指导用户下载(官方 GitHub)、扫码登录专属小号、启用正向 WS。
+- 支持两种运行方式:本机原生直装(轻量,推荐)或 Docker(隔离)。
+
 
 ## 本地开发
 

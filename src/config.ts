@@ -4,6 +4,8 @@ const DshQqBridgeConfig = z.object({
   napcat: z.object({
     wsUrl: z.string().url(),
     token: z.string().optional(),
+    /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
+    guideDoc: z.string().optional().default('docs/agent-napcat-guide.md'),
   }),
   access: z
     .object({
