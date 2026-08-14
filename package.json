@@ -1,0 +1,36 @@
+{
+  "name": "dsh-qq-bridge",
+  "version": "0.1.0",
+  "description": "A pluggable DSH host plugin that connects QQ (NapCat/OneBot) and forwards messages to DSH agents / local capabilities.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "qq",
+    "napcat",
+    "onebot",
+    "agent"
+  ],
+  "dependencies": {
+    "zod": "^3.23.0",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "@types/ws": "^8.5.10",
+    "@types/node": "^22.0.0"
+  }
+}
