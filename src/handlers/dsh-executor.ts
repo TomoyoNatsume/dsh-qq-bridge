@@ -1,9 +1,6 @@
 import { AgentExecutor } from './agent.js'
 
-/**
- * 从 DSH 的 session surface 中提取最后一条 assistant 消息的纯文本。
- * 允许的 ContentBlock 文本形状:{ type: 'text', text: string }。
- */
+/** 提取 session surface 中最后一条 assistant 消息的纯文本。 */
 export function extractLastAssistantText(events: readonly unknown[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const evt = events[i] as { type?: string; content?: readonly unknown[] } | null | undefined
@@ -20,53 +17,92 @@ export function extractLastAssistantText(events: readonly unknown[]): string | n
   return null
 }
 
+/** 一个可投料、等待、可释放销毁的 DSH agent 会话。 */
+export interface DshRenderedAgent {
+  followup(message: { content: unknown; source: unknown }): void
+  whenIdle(): Promise<void>
+  /** 销毁该会话底层的 DSH agent(释放资源)。 */
+  dispose(): Promise<void>
+}
+
 /**
- * DSH 服务句柄 —— 由插件从真实 DSH 注入,测试时可注入 mock。
- * createAgent 返回 live agent 本体,deliver 在其上投料并等待。
+ * DSH 服务句柄 —— 由插件注入,mock 可注入。
+ * getOrCreate 必须返回带 dispose 的 live agent,便于 executor 统一释放。
  */
 export interface DshServiceHandles {
-  /** 新建一个 Agent 会话,返回 live agent 与 teardown。 */
-  createAgent(options: { sessionId: string }): Promise<DshRenderedAgent>
-  /** 投递一条用户消息到该 agent,并等待其到达空闲。 */
+  /** 按 sessionKey 获取(已有)或创建(miss)一个 live agent。 */
+  getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent>
+  /** 投递用户消息并等待本轮完成。 */
   deliver(agent: DshRenderedAgent, prompt: string): Promise<void>
-  /** 读取会话 surface(events)以提取回复。 */
+  /** 读取会话 surface(events)以提取本轮回复。 */
   readSurface(sessionId: string): Promise<readonly unknown[]>
 }
 
-/** 一个已创建的、可投料等待的 DSH agent 渲染。 */
-export interface DshRenderedAgent {
-  /** 驱动接口:投料 + 等待空闲。 */
-  followup(message: { content: unknown; source: unknown }): void
-  whenIdle(): Promise<void>
-  /** 分解钩子(dispose agent)。 */
-  done(): Promise<void>
-}
-
 /**
- * A 内置 handler 的 DSH 真实实现:
- * 每个 sessionKey 派发一个独立 Agent 会话 → 投喂 payload → 等待空闲 → 读取回复 → 销毁。
+ * A 内置 handler 的 DSH 实现 —— 多轮上下文版本。
  *
- * M2 以「每次请求新建会话」实现(最简单、无持久化依赖);
- * M3 再把相同 sessionKey 复用持久化会话以获得多轮上下文。
+ * - 每个 QQ sessionKey 持有一个常驻 live agent:首次创建、之后复用 → 保留多轮上下文。
+ * - 同一 sessionKey 的并发消息串行排队,避免并发驱动同一会话。
+ * - disposeAll() 在插件 teardown 时释放全部 live agent。
+ * - disposeSession() 可主动丢弃某个会话(如错误恢复、会话上限)。
  */
 export class DshAgentExecutor implements AgentExecutor {
+  private agents = new Map<string, DshRenderedAgent>()
+  private sessions = new Map<string, string>() // sessionKey -> sessionId
+  private queues = new Map<string, Promise<void>>()
+
   constructor(private readonly dsh: DshServiceHandles) {}
 
   async run(sessionKey: string, payload: string): Promise<string> {
-    const sessionId = `qq-${hashKey(sessionKey)}`
-    const agent = await this.dsh.createAgent({ sessionId })
-    try {
-      await this.dsh.deliver(agent, payload)
-      const events = await this.dsh.readSurface(sessionId)
-      const text = extractLastAssistantText(events)
-      return text ?? '(agent produced no text)'
-    } finally {
-      await agent.done()
+    const prev = this.queues.get(sessionKey) ?? Promise.resolve()
+    const next = prev.then(() => this.runNow(sessionKey, payload))
+    // 吞掉队列尾部错误,避免串行链断掉后续消息
+    this.queues.set(sessionKey, next.then(() => undefined, () => undefined))
+    return next
+  }
+
+  private async runNow(sessionKey: string, payload: string): Promise<string> {
+    const sessionIdExists = this.sessions.get(sessionKey)
+    const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}`
+    this.sessions.set(sessionKey, sessionId)
+
+    let agent = this.agents.get(sessionKey)
+    if (!agent) {
+      agent = await this.dsh.getOrCreate({ sessionKey, sessionId })
+      this.agents.set(sessionKey, agent)
     }
+
+    await this.dsh.deliver(agent, payload)
+    const events = await this.dsh.readSurface(sessionId)
+    return extractLastAssistantText(events) ?? '(agent produced no text)'
+  }
+
+  /** 主动丢弃某个会话的 live agent。 */
+  async disposeSession(sessionKey: string): Promise<void> {
+    const agent = this.agents.get(sessionKey)
+    if (agent) {
+      this.agents.delete(sessionKey)
+      await agent.dispose()
+    }
+    this.sessions.delete(sessionKey)
+    this.queues.delete(sessionKey)
+  }
+
+  /** 释放全部 live agent(插件 teardown 时调用)。 */
+  async disposeAll(): Promise<void> {
+    const agents = [...this.agents.values()]
+    this.agents.clear()
+    this.sessions.clear()
+    this.queues.clear()
+    await Promise.all(agents.map((a) => a.dispose()))
+  }
+
+  get liveSessionCount(): number {
+    return this.agents.size
   }
 }
 
-/** 简单确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */
+/** 确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */
 export function hashKey(input: string): string {
   let h = 2166136261
   for (let i = 0; i < input.length; i++) {

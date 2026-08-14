@@ -2,8 +2,8 @@
 
 一个用于 **DSH(DeepSeek Harness)** 的 Host 端插件:通过 **NapCat(OneBot 协议)** 连接 QQ,把 QQ 消息转发给 DSH Agent / 本地能力处理,并回发结果。
 
-> **状态:M1(架构定稿 + 可测核心完成)。**
-> 当前是核心模块 + 本地回环单测,无需 QQ 小号即可测试。真实 DSH services 对接(agents/agentLoop)在 M2。
+> **状态:M3(核心 + DSH 对接 + 多轮上下文完成)。**
+> 核心模块、OneBot client、router、security 均已落地并有本地单测;M2/M3 已接通 DSH `agentLoop`+`sessionQuery` 驱动 Agent,并实现每 QQ 会话常驻 live agent 的多轮上下文。真实 QQ(NapCat + 小号)端到端验证在 M4。
 
 ## 设计定位
 
@@ -38,9 +38,9 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 
 - **M0** 架构/部署/接口定稿 ✅
 - **M1** 工程骨架 + OneBot client + router + security + 本地单测 ✅
-- **M2** 接通 DSH `agents`/`agentLoop`,端到端连通
-- **M3** 装 NapCat + 接入真实小号,QQ→DSH→回发闭环
-- **M4** README/License/示例完善,发布并申报进 dsh-plugin 社区
+- **M2** 接通 DSH `agentLoop` + `sessionQuery`,驱动 Agent 并读取回复 ✅
+- **M3** 常驻 live agent 实现多轮上下文(每 QQ 会话一个 DSH agent),per-key 串行,teardown 释放 ✅
+- **M4** 装 NapCat + 接入真实小号,QQ→DSH→回发闭环
 
 ## 本地开发
 

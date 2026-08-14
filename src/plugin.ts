@@ -2,20 +2,18 @@ import { OnebotClient, WsTransport, Transport } from './onebot/client.js'
 import { MessageRouter, OutboundSender } from './router.js'
 import { AccessGate } from './security.js'
 import { AgentRpcHandler } from './handlers/agent.js'
-import { DshAgentExecutor, DshRenderedAgent, DshServiceHandles } from './handlers/dsh-executor.js'
+import { DshAgentExecutor, DshRenderedAgent } from './handlers/dsh-executor.js'
 import { ShellHandler } from './handlers/shell.js'
 import { DshQqBridgeConfig } from './config.js'
 import { OnebotMessageEvent } from './onebot/types.js'
 
-/**
- * 结构性描述 DSH 服务的宿主接口。
- * 本仓库作独立工程,不把 DSH 内部类型作为硬依赖安装;
- * apply 时从 context 读真实服务并按本接口使用。
- */
+/** DSH live agent 最小画面。 */
 interface DshAgent {
   followup(message: { content: unknown; source: unknown }): void
   whenIdle(): Promise<void>
 }
+
+/** 结构性描述 DSH 服务;不硬依赖 DSH 内部类型。 */
 interface DshCtx {
   agentLoop?: {
     createAgent(
@@ -30,11 +28,8 @@ interface DshCtx {
 
 /**
  * Cordis 插件入口(Host 侧)。
- * M2:接通真实 DSH services —— agentLoop 驱动 Agent,sessionQuery 读回复。
- *
- * 依赖:
- * - agentLoop:硬依赖(注入),未加载 agent-loop 时 Cordis 等待。
- * - sessionQuery:可选;缺失时 reply 读不到,回退占位。
+ * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
+ * 依赖:agentLoop(注入,硬依赖);sessionQuery(可选)。
  */
 export default function (options: DshQqBridgeConfig) {
   const cfg = DshQqBridgeConfig.parse(options)
@@ -74,45 +69,42 @@ export default function (options: DshQqBridgeConfig) {
         void router.route(evt)
       })
 
-      return () => {
+      return async () => {
         unregisterAgent()
         unregisterShell()
         unsubMessages()
-        void client.disconnect()
+        await executor.disposeAll() // 释放全部常驻 agent
+        await client.disconnect()
       }
     },
   }
 }
 
 function makeDshExecutor(ctx: DshCtx) {
-  const handle = wireDsh(ctx)
-  if (handle) return new DshAgentExecutor(handle)
-  // 无 DSH 服务时占位,便于纯 CLI/测试环境启动
-  const fallback: DshServiceHandles = {
-    async createAgent({ sessionId }) {
-      void sessionId
-      return {
-        followup() {},
-        async whenIdle() {},
-        async done() {},
-      }
+  const handles = wireDsh(ctx)
+  if (handles) return new DshAgentExecutor(handles)
+  // 无 DSH 服务时占位,便于纯 CLI / 测试
+  const fallback = {
+    async getOrCreate(): Promise<DshRenderedAgent> {
+      return { followup() {}, async whenIdle() {}, async dispose() {} }
     },
     async deliver() {},
-    async readSurface() {
+    async readSurface(): Promise<readonly unknown[]> {
       return []
     },
   }
   return new DshAgentExecutor(fallback)
 }
 
-/** 把真实 DSH 服务包装成 DshServiceHandles。 */
-function wireDsh(ctx: DshCtx): DshServiceHandles | undefined {
+/** 把真实 DSH 服务包装成 executor 所需的句柄。 */
+function wireDsh(ctx: DshCtx) {
   const loop = ctx.agentLoop
   if (!loop) return undefined
   const query = ctx.sessionQuery
 
   return {
-    async createAgent(options: { sessionId: string }): Promise<DshRenderedAgent> {
+    async getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent> {
+      void options.sessionKey
       const handle = await loop.createAgent(ctx, {
         sessionId: options.sessionId,
         agentOptions: {},
@@ -125,7 +117,7 @@ function wireDsh(ctx: DshCtx): DshServiceHandles | undefined {
         async whenIdle() {
           await handle.agent.whenIdle()
         },
-        async done() {
+        async dispose() {
           await handle.dispose()
         },
       }
