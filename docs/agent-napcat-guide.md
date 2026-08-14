@@ -53,6 +53,34 @@
 - **先按 0.1 节确认为当前 OS/架构选择的构建**(Windows / Linux-x64 / macOS-arm64 等),再让用户下载对应文件。
 - ⚠️ **只从官方 GitHub 获取**,不要使用任何网络上的「一键包 / 收费商业版 / 站群版」——收费版通常是第三方打包,且可能夹带非开源内容。
 
+### 3.1.1 Linux:一键安装命令(给用户的默认指令,默认带镜像下载)
+
+对 **Linux**(含 WSL2 / 无头服务器)的官方一键安装,给用户默认以下命令。**默认加 GitHub 代理镜像**,避免直连 GitHub 下载大文件被中断。
+
+```bash
+curl -o napcat.sh https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.sh \
+  && bash napcat.sh --docker n --cli y
+```
+
+- `--docker n` → Shell 直接安装(不用 Docker);`--cli y` → 装 TUI-CLI(便于命令行管理/看二维码)。
+- 以下命令在`$HOME`等用户目录先手动下好完好的 `NapCat.Shell.zip`,让脚本跳过内置下载:
+
+```bash
+cd ~
+wget -c -O NapCat.Shell.zip "https://gh-proxy.com/https://github.com/NapNeko/NapCatQQ/releases/latest/download/NapCat.Shell.zip"
+```
+
+> **镜像来源说明**:`gh-proxy.com`、`ghfast.top`、`gh-proxy.net` 等是常用的 GitHub 加速反代。若其中一个慢或失败,可换另一个;`wget -c` 支持断点续传。
+
+**已知坑(务必提前提醒用户):** 直连 GitHub 下载 `NapCat.Shell.zip` 在国内网络下极易被中断,导致文件损坏,安装脚本报 **`[文件验证失败, 请检查错误]`**。此时:
+1. 不要直接重跑脚本(脚本会沿用坏 zip)。
+2. 手动用上面的镜像命令重新下载完整 zip,再在同一目录跑脚本,脚本会打印「检测到已下载NapCat安装包,跳过下载...」并越过该校验点。
+
+若后续又报「QQ下载失败」,同样手动下 `QQ.deb` 到同目录(腾讯官方源,一般较稳):
+```bash
+wget -c -O QQ.deb "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/beta/727ce4e5/linuxqq_3.2.30-50828_amd64.deb"
+```
+
 ### 3.2 运行并登录
 1. 解压并运行 NapCat 可执行文件。
 2. 终端/窗口会出现**登录二维码**。
@@ -114,6 +142,8 @@ services:
 | 症状 | 可能原因 | 指引 |
 |------|---------|------|
 | 连接拒绝/超时 | NapCat 未运行 / 端口不对 / 未监听该端口 | 确认运行中,核对 `wsUrl` 端口 |
+| 安装报 文件验证失败 | `NapCat.Shell.zip` 直连 GitHub 下载损坏 | 手动用镜像+`wget -c` 重新下完整 zip 到同目录再重跑(见 3.1.1) |
+| 安装报 QQ下载失败 | LinuxQQ 包下载失败 | 手动下 `QQ.deb` 到同目录后重跑(见 3.1.1) |
 | 401 / token 错误 | token 不匹配 | 让用户核对 NapCat 与插件 `token` |
 | 收到消息但插件无响应 | 没用指令前缀 / 白名单不含该 QQ | 检查 `commandPrefix` 与 `access.adminQq` |
 | 机器人小号收不到主号消息 | 小号未在线 / 被拉黑 | 让用户确认小号在线 |
