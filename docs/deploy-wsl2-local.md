@@ -114,6 +114,31 @@ DSH_QQ_WS_URL=ws://127.0.0.1:3001 DSH_QQ_ADMIN=<你的主号QQ> npm start
 
 > ⚠️ **安全提醒**:本机 NapCat 的 WS token 与 WebUI token 属敏感凭证,不要提交进 Git。正式对外使用时建议在 WebUI 轮换并改用环境变量注入。
 
+### 🛠 日常运维命令
+
+本机 NapCat 由官方控制脚本 `napcat` 管理(安装时随 TUI-CLI 落地到 `/usr/local/bin`):
+
+```bash
+# 启动 / 状态 / 查看日志(登录二维码与登录成功会在这里打印)
+napcat start 3678586949
+napcat status 3678586949
+napcat log 3678586949            # tail -f 等
+# 停止 / 重启 / 开机自启
+napcat stop 3678586949
+napcat restart 3678586949
+napcat startup 3678586949
+```
+
+- **小号掉线恢复**:若 NapCat 进程停止(`napcat status` 显示无服务),先 `napcat start <QQ号>` 拉起;若需重新扫码,看 `napcat log` 里的二维码,用手机 QQ 扫。
+- **插件与 DSH Host**:插件是以 Cordis 插件形式挂在 DSH Host 的 web profile(`~/.dsh/profiles/web/cordis.patch.yml`,`name` 指向本仓库 `dist/plugin.js`)。
+- **自动重连**:`WsTransport` 现已内置断线自动重连(指数退避)。因此 **NapCat 掉线/重启后无需重启 DSH Host**,插件会自动恢复。仅当修改插件代码需要重新 build 时,才需要让 Host 重新加载(重启 host 或触发 `cordis.patch.yml` 热重载)。
+
+### ✅ 真实 DSH Agent 驱动(全链路)
+
+插件通过 `ctx.agentLoop.createAgent(...)` + `ctx.sessionQuery.readSurface()` 接入真实 DSH Agent:
+- 每 QQ 会话持有一个常驻 live agent(多轮上下文)。
+- 从主号发 `/dsh <问题>`,机器人小号回发**由真实 DSH Agent 生成的智能回复**(而非 `echo:` 回显)。
+
 ---
 
 ## 第 5 步(可选):做成常驻服务
