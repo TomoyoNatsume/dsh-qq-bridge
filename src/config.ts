@@ -18,7 +18,10 @@ const DshQqBridgeConfig = z.object({
   agent: z
     .object({
       preset: z.string().optional(),
-      model: z.string().optional(),
+      /** 驱动 agent 的 provider 路由(须有已注册适配器)。 */
+      provider: z.string().default('deepseek-official'),
+      /** 驱动 agent 的模型 id(provider 适配器解释)。 */
+      model: z.string().default('deepseek-v4-flash'),
     })
     .default({}),
   shell: z

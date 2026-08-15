@@ -54,7 +54,7 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
   }
   const router = new MessageRouter(gate, outbound)
 
-  const executor = makeDshExecutor(ctx)
+  const executor = makeDshExecutor(ctx, cfg.agent)
   const unregisterAgent = router.register(new AgentRpcHandler(executor))
 
   let unregisterShell: () => void = () => {}
@@ -84,8 +84,8 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
 
 export default { name, inject, apply }
 
-function makeDshExecutor(ctx: DshCtx) {
-  const handles = wireDsh(ctx)
+function makeDshExecutor(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; model?: string }) {
+  const handles = wireDsh(ctx, agentCfg)
   if (handles) return new DshAgentExecutor(handles)
   // 无 DSH 服务时占位,便于纯 CLI / 测试
   const fallback = {
@@ -101,7 +101,7 @@ function makeDshExecutor(ctx: DshCtx) {
 }
 
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
-function wireDsh(ctx: DshCtx) {
+function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; model?: string }) {
   const loop = ctx.agentLoop
   if (!loop) return undefined
   const query = ctx.sessionQuery
@@ -111,7 +111,11 @@ function wireDsh(ctx: DshCtx) {
       void options.sessionKey
       const handle = await loop.createAgent(ctx, {
         sessionId: options.sessionId,
-        agentOptions: {},
+        // agent 的 model 路由必须显式给出,否则 prompt 组装时 `{{model}}` 无值。
+        agentOptions: {
+          ...(agentCfg?.provider ? { provider: agentCfg.provider } : {}),
+          ...(agentCfg?.model ? { model: agentCfg.model } : {}),
+        },
         meta: { cwd: workdir() },
       })
       return {
