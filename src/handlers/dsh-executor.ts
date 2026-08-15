@@ -97,11 +97,16 @@ export class DshAgentExecutor implements AgentExecutor {
     await this.dsh.deliver(agent, payload)
     const events = await this.readEvents(agent, sessionId)
     const text = extractLastAssistantText(events)
-    if (text === null && ['1', 'true'].includes((process.env.DSH_QQ_DEBUG ?? '').toLowerCase())) {
-      // 调试图:写入实际 surface 事件到 /tmp,便于排查 assistant 回复形态。
+    if (text === null) {
+      // 调试图:提取不到文本时无条件落盘,便于排查 assistant 回复形态。
       try {
         const fs = await import('node:fs')
         fs.writeFileSync('/tmp/dsh-qq-surface.json', JSON.stringify(events, null, 2))
+        // 也落一份持久化 surface,判断是「live 读取问题」还是「确实无文本」。
+        try {
+          const persisted = await this.dsh.readSurface(sessionId)
+          fs.writeFileSync('/tmp/dsh-qq-persisted.json', JSON.stringify(persisted, null, 2))
+        } catch { /* noop */ }
       } catch { /* noop */ }
     }
     return text ?? '(agent produced no text)'
