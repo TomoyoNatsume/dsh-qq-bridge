@@ -2,8 +2,8 @@
 
 一个用于 **DSH(DeepSeek Harness)** 的 Host 端插件:通过 **NapCat(OneBot 协议)** 连接 QQ,把 QQ 消息转发给 DSH Agent / 本地能力处理,并回发结果。
 
-> **状态:M3(核心 + DSH 对接 + 多轮上下文完成)。**
-> 核心模块、OneBot client、router、security 均已落地并有本地单测;M2/M3 已接通 DSH `agentLoop`+`sessionQuery` 驱动 Agent,并实现每 QQ 会话常驻 live agent 的多轮上下文。真实 QQ(NapCat + 小号)端到端验证在 M4。
+> **状态:M5 预备 + M6 打磨中。**
+> 核心模块、OneBot client、router、security、DSH `agentLoop`/`sessionQuery` 驱动、每 QQ 会话常驻 live agent 的多轮上下文均已落地,并新增**本地回环全链路测试**与**独立 CLI 入口**。剩余:真实 QQ(NapCat + 小号)端到端验证与社区发布。
 
 ## 设计定位
 
@@ -41,6 +41,7 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 - **M2** 接通 DSH `agentLoop` + `sessionQuery` 驱动 Agent ✅
 - **M3** 常驻 live agent 实现多轮上下文 ✅
 - **M4** 连接健康检查 + 给 Agent 的 NapCat 安装向导(`docs/agent-napcat-guide.md`)✅
+- **M5** 预备:本地回环全链路测试(`test/e2e-loopback.test.ts`)+ 独立 CLI 入口(`src/main.ts`,无 DSH 回显模式)✅
 - **M5** 真实小号端到端验证(QQ→DSH→回发,需实机)
 - **M6** 完善文档/示例,发布并申报进 dsh-plugin 社区
 
@@ -58,9 +59,22 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 ```bash
 # 本会话因沙箱默认 npm cache 只读,需指定工作区内 cache
 npm install --cache ./.npm-cache
-npm test          # 5 个单测,无需 QQ 小号
-npx tsc -p tsconfig.json --noEmit
+npm test          # 单元 + 本地回环集成测试,无需 QQ 小号
+npx tsc -p tsconfig.json --noEmit   # 类型检查
 ```
+
+### 独立 CLI 入口(无 DSH 回显模式)
+
+项目提供 `src/main.ts`(`npm run build` 后 `npm start`),用于在未接真实 DSH 时先打通 QQ↔插件链路:
+
+```bash
+npm run build
+DSH_QQ_WS_URL=ws://127.0.0.1:3001 DSH_QQ_ADMIN=10001 npm start
+```
+
+向机器人小号发 `/dsh hello`,会回显 `echo: hello`。接入真实 DSH 请改用 `src/index.ts` 的 Cordis 插件入口。
+
+配置模板见 [`examples/config.example.json`](examples/config.example.json);完整上手见 [`docs/quickstart-human.md`](docs/quickstart-human.md)。
 
 ## 许可
 

@@ -1,0 +1,21 @@
+{
+  "comment": "dsh-qq-bridge 配置模板 —— 复制为 your-config.json 后按需修改。各字段与 src/config.ts 的 zod schema 一一对应。",
+  "napcat": {
+    "wsUrl": "ws://127.0.0.1:3001",
+    "token": "",
+    "guideDoc": "docs/agent-napcat-guide.md"
+  },
+  "access": {
+    "adminQq": 10001,
+    "allowlist": [10002, 10003],
+    "commandPrefix": "/dsh",
+    "mode": "whitelist"
+  },
+  "agent": {
+    "preset": "",
+    "model": ""
+  },
+  "shell": {
+    "enabled": false
+  }
+}
