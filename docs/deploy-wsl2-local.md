@@ -131,7 +131,18 @@ napcat startup 3678586949
 
 - **小号掉线恢复**:若 NapCat 进程停止(`napcat status` 显示无服务),先 `napcat start <QQ号>` 拉起;若需重新扫码,看 `napcat log` 里的二维码,用手机 QQ 扫。
 - **插件与 DSH Host**:插件是以 Cordis 插件形式挂在 DSH Host 的 web profile(`~/.dsh/profiles/web/cordis.patch.yml`,`name` 指向本仓库 `dist/plugin.js`)。
-- **自动重连**:`WsTransport` 现已内置断线自动重连(指数退避)。因此 **NapCat 掉线/重启后无需重启 DSH Host**,插件会自动恢复。仅当修改插件代码需要重新 build 时,才需要让 Host 重新加载(重启 host 或触发 `cordis.patch.yml` 热重载)。
+- **自动重连**:`WsTransport` 现已内置断线自动重连(指数退避)。因此 **NapCat 掉线/重启后无需重启 DSH Host**,插件会自动恢复。
+- **改插件代码的热更新**:已在 `cordis.patch.yml` 重新启用模块级 HMR 并 watch 插件目录(`root: [dsh-qq-bridge 路径]`)。此后:
+  ```bash
+  # 改完源码只需 build,不用重启 host:
+  cd /home/liangyihao/temp/dsh-qq-bridge && npm run build
+  # HMR 检测到 dist/plugin.js 变化后自动热重载插件
+  ```
+- **一键重启(兜底)**:若 HMR 未生效或需要完全干净重启:
+  ```bash
+  bash /home/liangyihao/temp/dsh-qq-bridge/scripts/restart-dsh.sh   # build + 重启 host
+  bash /home/liangyihao/temp/dsh-qq-bridge/scripts/restart-dsh.sh --no-build  # 仅重启
+  ```
 
 ### ✅ 真实 DSH Agent 驱动(全链路)
 
