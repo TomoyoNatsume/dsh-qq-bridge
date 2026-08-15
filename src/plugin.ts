@@ -64,13 +64,13 @@ export default function (options: DshQqBridgeConfig) {
         )
       }
 
-      await client.connect().catch((err) => {
-        // 连接健康检查失败:给出对 Agent/用户可执行的指引,而不是沉默失败
-        const guidance = buildConnectGuidance(cfg, err)
-        return Promise.reject(new Error(guidance))
-      })
+      // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
+      // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
       const unsubMessages = client.onMessage((evt: OnebotMessageEvent) => {
         void router.route(evt)
+      })
+      client.connect().catch((err) => {
+        console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err))
       })
 
       return async () => {

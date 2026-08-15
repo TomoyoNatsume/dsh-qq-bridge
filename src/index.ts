@@ -16,3 +16,5 @@ export { ShellHandler } from './handlers/shell.js'
 export { DshQqBridgeConfig } from './config.js'
 export type * from './config.js'
 export { buildConnectGuidance } from './plugin.js'
+// 包入口默认导出即为 Cordis 插件本体:让 Loader `unwrapExports` 能取到 default。
+export { default } from './plugin.js'
