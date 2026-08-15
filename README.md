@@ -2,8 +2,8 @@
 
 一个用于 **DSH(DeepSeek Harness)** 的 Host 端插件:通过 **NapCat(OneBot 协议)** 连接 QQ,把 QQ 消息转发给 DSH Agent / 本地能力处理,并回发结果。
 
-> **状态:M5 预备 + M6 打磨中。**
-> 核心模块、OneBot client、router、security、DSH `agentLoop`/`sessionQuery` 驱动、每 QQ 会话常驻 live agent 的多轮上下文均已落地,并新增**本地回环全链路测试**与**独立 CLI 入口**。剩余:真实 QQ(NapCat + 小号)端到端验证与社区发布。
+> **状态:M5 已实机验证 + M6 打磨中。**
+> 核心模块、OneBot client、router、security、DSH `agentLoop`/`sessionQuery` 驱动、每 QQ 会话常驻 live agent 的多轮上下文均已落地,并新增**本地回环全链路测试**与**独立 CLI 入口**。M5 已在本机实机打通:主号「/dsh ping」→ NapCat → 插件 → 回发「echo: ping」双向可达(当前为 fallback 回显;真实 DSH Agent 驱动待接)。
 
 ## 设计定位
 
@@ -42,7 +42,7 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 - **M3** 常驻 live agent 实现多轮上下文 ✅
 - **M4** 连接健康检查 + 给 Agent 的 NapCat 安装向导(`docs/agent-napcat-guide.md`)✅
 - **M5** 预备:本地回环全链路测试(`test/e2e-loopback.test.ts`)+ 独立 CLI 入口(`src/main.ts`,无 DSH 回显模式)✅
-- **M5** 真实小号端到端验证(QQ→DSH→回发,需实机)
+- **M5** 实机端到端验证 ✅:本机 NapCat + 小号登录 + token 鉴权 + 插件连接 + 双向回发(`/dsh ping` → `echo: ping`)全部通过;真实 DSH Agent 驱动待接
 - **M6** 完善文档/示例,发布并申报进 dsh-plugin 社区
 
 ## NapCat 部署策略(方案 1)
