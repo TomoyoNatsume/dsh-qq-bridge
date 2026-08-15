@@ -98,14 +98,14 @@ export class DshAgentExecutor implements AgentExecutor {
     const events = await this.readEvents(agent, sessionId)
     const text = extractLastAssistantText(events)
     if (text === null) {
-      // 调试图:提取不到文本时无条件落盘,便于排查 assistant 回复形态。
+      // 调试图:提取不到文本时无条件落盘(写到 workspace 内,host 与开发侧都能访问)。
       try {
         const fs = await import('node:fs')
-        fs.writeFileSync('/tmp/dsh-qq-surface.json', JSON.stringify(events, null, 2))
-        // 也落一份持久化 surface,判断是「live 读取问题」还是「确实无文本」。
+        const dir = '/home/liangyihao/temp/dsh-qq-bridge'
+        fs.writeFileSync(`${dir}/.debug-surface.json`, JSON.stringify(events, null, 2))
         try {
           const persisted = await this.dsh.readSurface(sessionId)
-          fs.writeFileSync('/tmp/dsh-qq-persisted.json', JSON.stringify(persisted, null, 2))
+          fs.writeFileSync(`${dir}/.debug-persisted.json`, JSON.stringify(persisted, null, 2))
         } catch { /* noop */ }
       } catch { /* noop */ }
     }
