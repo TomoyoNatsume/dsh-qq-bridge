@@ -57,7 +57,10 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
   const router = new MessageRouter(gate, outbound)
 
   const executor = makeDshExecutor(ctx, cfg.agent)
-  const unregisterAgent = router.register(new AgentRpcHandler(executor, { streamReasoning: cfg.agent.streamReasoning }))
+  const unregisterAgent = router.register(new AgentRpcHandler(executor, {
+    streamReasoning: cfg.agent.streamReasoning,
+    maxMessageLength: cfg.agent.maxMessageLength,
+  }))
 
   let unregisterShell: () => void = () => {}
   if (cfg.shell.enabled) {

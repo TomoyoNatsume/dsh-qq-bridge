@@ -1,6 +1,34 @@
 import { Handler, HandlerContext } from '../router.js'
 
 /**
+ * 把文本按最大长度切分为多条,保证每条不超过 maxLen。
+ * 优先在换行/标点附近切(保持可读),实在没有边界则硬切。
+ */
+export function splitText(text: string, maxLen: number): string[] {
+  if (maxLen <= 0 || text.length <= maxLen) return text === '' ? [] : [text]
+  const parts: string[] = []
+  let rest = text
+  while (rest.length > maxLen) {
+    // 在 maxLen-1 往前找最近的换行或标点作为切点(留一位容纳标点)
+    const searchTo = maxLen - 1
+    let cut = rest.lastIndexOf('\n', searchTo)
+    if (cut <= 0) cut = Math.max(
+      rest.lastIndexOf('。', searchTo),
+      rest.lastIndexOf('！', searchTo),
+      rest.lastIndexOf('？', searchTo),
+      rest.lastIndexOf('.', searchTo),
+      rest.lastIndexOf('，', searchTo),
+      rest.lastIndexOf(',', searchTo),
+    )
+    if (cut <= 0) cut = searchTo // 无边界,硬切(maxLen-1,保证 <= maxLen)
+    parts.push(rest.slice(0, cut + 1).trimStart())
+    rest = rest.slice(cut + 1)
+  }
+  if (rest.trim()) parts.push(rest.trimStart())
+  return parts.filter((p) => p.length > 0)
+}
+
+/**
  * 可注入的“遥控 DSH Agent”执行器。
  * 生产环境由 Cordis 插件接入 DSH 的 agents/agentLoop 服务注入;
  * 测试时可注入一个假执行器,无需真实 DSH。
@@ -28,13 +56,24 @@ export class AgentRpcHandler implements Handler {
 
   constructor(
     private readonly executor: AgentExecutor,
-    private readonly opts: { streamReasoning?: boolean } = {},
+    private readonly opts: {
+      streamReasoning?: boolean
+      /** 单条 QQ 消息最大长度;超长自动拆分为多条发送。 */
+      maxMessageLength?: number
+    } = {},
   ) {}
 
   test(payload: string): boolean {
     // 默认所有有效载荷都交给 Agent(可扩展:保留特定子命令给其它 handler)。
     // 若不希望 Agent 吞掉所有指令,可改成匹配某前缀,例如 payload 以 `ask ` 开头。
     return true
+  }
+
+  /** 把一段文本按 maxLen 切分后逐条回发。 */
+  private async respondChunk(ctx: HandlerContext, chunk: string): Promise<void> {
+    const maxLen = this.opts.maxMessageLength ?? 4500
+    const parts = splitText(chunk, maxLen)
+    for (const part of parts) await ctx.respond(part)
   }
 
   async run(ctx: HandlerContext): Promise<void> {
@@ -45,12 +84,13 @@ export class AgentRpcHandler implements Handler {
       // 避免逐 token 的思考增量在聊天框刷屏。可用 streamReasoning 开启。
       const result = await this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
         if (kind === 'reasoning' && !this.opts.streamReasoning) return
-        void ctx.respond(chunk)
+        void this.respondChunk(ctx, chunk)
       })
-      // 最终结果(若与已分段内容不同,回发最终完整版作为收尾)。
-      await ctx.respond(result || '(no output)')
+      // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
+      const final = result || '(no output)'
+      await this.respondChunk(ctx, final)
     } catch (err) {
-      await ctx.respond(`agent error: ${err instanceof Error ? err.message : String(err)}`)
+      await this.respondChunk(ctx, `agent error: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 }

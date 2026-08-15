@@ -24,6 +24,8 @@ const DshQqBridgeConfig = z.object({
       model: z.string().default('deepseek-v4-flash'),
       /** 是否把思考过程(reasoning)也分段回发。默认 false:只回发思考结果,避免刷屏。 */
       streamReasoning: z.boolean().default(false),
+      /** 单条 QQ 消息最大长度(字符数);超长自动拆分为多条发送。QQ 官方单条约 5000 字,默认留余量。 */
+      maxMessageLength: z.number().int().positive().default(4500),
     })
     .default({}),
   shell: z

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { MessageRouter } from '../src/router.js'
 import { AccessGate } from '../src/security.js'
-import { AgentRpcHandler } from '../src/handlers/agent.js'
+import { AgentRpcHandler, splitText } from '../src/handlers/agent.js'
 import { ShellHandler } from '../src/handlers/shell.js'
 import { OnebotMessageEvent } from '../src/onebot/types.js'
 
@@ -116,5 +116,33 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     routerOpen.register(new AgentRpcHandler(execOpen as never, { streamReasoning: true }))
     await routerOpen.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
     expect(sent2).toEqual(['开始思考', '这是结果', '最终完整结果'])
+  })
+
+  it('splitText:超长文本按 maxLen 拆分,且每条不超过限制', () => {
+    const long = 'A'.repeat(100) + '。' + 'B'.repeat(100) + '。' + 'C'.repeat(100)
+    const parts = splitText(long, 50)
+    // 至少 3 条,且每条 <= 50
+    expect(parts.length).toBeGreaterThanOrEqual(3)
+    for (const p of parts) expect(p.length).toBeLessThanOrEqual(50)
+    // 去掉标点后内容完整保留(A*100 + B*100 + C*100)
+    expect(parts.join('').replace(/。/g, '')).toBe('A'.repeat(100) + 'B'.repeat(100) + 'C'.repeat(100))
+  })
+
+  it('splitText:短文本原样返回,空文本返回空数组', () => {
+    expect(splitText('你好', 4500)).toEqual(['你好'])
+    expect(splitText('', 4500)).toEqual([])
+  })
+
+  it('超长最终回复会自动拆分多条发送', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    const longResult = 'x'.repeat(6000)
+    const exec = { run: vi.fn(async () => longResult) }
+    router.register(new AgentRpcHandler(exec as never, { maxMessageLength: 2000 }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    expect(sent.length).toBeGreaterThanOrEqual(3)
+    for (const s of sent) expect(s.length).toBeLessThanOrEqual(2000)
+    expect(sent.join('')).toBe(longResult)
   })
 })
