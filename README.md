@@ -53,6 +53,8 @@ NapCat 负责 QQ 登录/收发(寄生在已登录的官方 QQ 客户端上,非�
 - 该文档是**给 AI Agent 看的安装向导**:Agent 据此一步步指导用户下载(官方 GitHub)、扫码登录专属小号、启用正向 WS。
 - 支持两种运行方式:本机原生直装(轻量,推荐)或 Docker(隔离)。
 
+**本机实机部署**:当前机器的具体安装 + 扫码登录 + 开启正向 WS + 对接插件步骤,见 [`docs/deploy-wsl2-local.md`](docs/deploy-wsl2-local.md)。
+
 
 ## 本地开发
 
