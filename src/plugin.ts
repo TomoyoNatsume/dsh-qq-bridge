@@ -156,19 +156,25 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
         source: { kind: 'user' },
       }
 
-      // 流式分段:订阅该会话的 session/event,收集 assistant/chunk 的文本增量。
+      // 流式分段:订阅该会话的 session/event,按「句子边界 + 最大长度」聚合后回发。
+      // 注意:text-delta 是逐 token 到达,若按时间窗批量会在 QQ 刷出单个词;
+      // 改为累积到完整句子/段落再回发,兼顾及时性与可读性。
       let unsubscribe: (() => void) | undefined
-      const chunkBuf: { kind: 'text' | 'reasoning'; text: string }[] = []
-      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      const textBuf: string[] = []
+      const reasoningBuf: string[] = []
       const sessionId = (agent as unknown as { _session?: { id?: string } })._session?.id
-      const flush = () => {
-        if (flushTimer) {
-          clearTimeout(flushTimer)
-          flushTimer = null
-        }
-        if (chunkBuf.length === 0 || !onChunk) return
-        const batch = chunkBuf.splice(0)
-        for (const { kind, text } of batch) onChunk(text, kind)
+      const MIN_FLUSH = 8 // 最少多少字符才值得单独发一条
+      const MAX_FLUSH = 200 // 无标点时最多攒多少字符强制发
+      const sentenceBoundary = /[。！？!?；;\n]$/
+      const flushText = () => {
+        if (textBuf.length === 0) return
+        const text = textBuf.splice(0).join('')
+        if (text && onChunk) onChunk(text, 'text')
+      }
+      const flushReasoning = () => {
+        if (reasoningBuf.length === 0) return
+        const text = reasoningBuf.splice(0).join('')
+        if (text && onChunk) onChunk(text, 'reasoning')
       }
       if (onChunk && ctx.on) {
         unsubscribe = ctx.on('session/event', (subject, evt) => {
@@ -176,12 +182,19 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
           const chunk = (evt as { type?: string; data?: { chunk?: { type?: string; text?: string } } }).data?.chunk
           if (!chunk) return
           if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
-            chunkBuf.push({ kind: 'text', text: chunk.text })
+            textBuf.push(chunk.text)
+            const joined = textBuf.join('')
+            // 句子边界或超长时回发一条完整段落
+            if ((joined.length >= MIN_FLUSH && sentenceBoundary.test(joined)) || joined.length >= MAX_FLUSH) {
+              flushText()
+            }
           } else if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
-            chunkBuf.push({ kind: 'reasoning', text: chunk.text })
+            reasoningBuf.push(chunk.text)
+            const joined = reasoningBuf.join('')
+            if ((joined.length >= MIN_FLUSH && sentenceBoundary.test(joined)) || joined.length >= MAX_FLUSH) {
+              flushReasoning()
+            }
           }
-          // 按 ~800ms 时间窗批量冲刷,避免逐 token 刷屏。
-          if (!flushTimer) flushTimer = setTimeout(flush, 800)
         })
       }
 
@@ -203,11 +216,13 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
             fs.writeFileSync(`${dir}/.debug-turn-log.json`, JSON.stringify(evts, null, 2))
           }
         } catch { /* noop */ }
-        flush() // 先把已收集的分段发出去,再抛错
+        flushReasoning()
+        flushText() // 先把已收集的分段发出去,再抛错
         unsubscribe?.()
         throw err
       }
-      flush() // 收尾冲刷
+      flushReasoning()
+      flushText() // 收尾冲刷剩余内容
       unsubscribe?.()
     },
 
