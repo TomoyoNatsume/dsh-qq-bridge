@@ -26,7 +26,10 @@ export interface AgentExecutor {
 export class AgentRpcHandler implements Handler {
   name = 'agent'
 
-  constructor(private readonly executor: AgentExecutor) {}
+  constructor(
+    private readonly executor: AgentExecutor,
+    private readonly opts: { streamReasoning?: boolean } = {},
+  ) {}
 
   test(payload: string): boolean {
     // 默认所有有效载荷都交给 Agent(可扩展:保留特定子命令给其它 handler)。
@@ -38,8 +41,11 @@ export class AgentRpcHandler implements Handler {
     const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
     try {
       // 分段返回:agent 边产出边回发,用户不必等整轮结束。
+      // 默认只回发「思考结果」(kind='text');思考过程(reasoning)默认忽略,
+      // 避免逐 token 的思考增量在聊天框刷屏。可用 streamReasoning 开启。
       const result = await this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
-        void ctx.respond(kind === 'reasoning' ? `[思考] ${chunk}` : chunk)
+        if (kind === 'reasoning' && !this.opts.streamReasoning) return
+        void ctx.respond(chunk)
       })
       // 最终结果(若与已分段内容不同,回发最终完整版作为收尾)。
       await ctx.respond(result || '(no output)')

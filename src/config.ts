@@ -22,6 +22,8 @@ const DshQqBridgeConfig = z.object({
       provider: z.string().default('deepseek-official'),
       /** 驱动 agent 的模型 id(provider 适配器解释)。 */
       model: z.string().default('deepseek-v4-flash'),
+      /** 是否把思考过程(reasoning)也分段回发。默认 false:只回发思考结果,避免刷屏。 */
+      streamReasoning: z.boolean().default(false),
     })
     .default({}),
   shell: z

@@ -85,4 +85,36 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh what is dsh?' }))
     expect(agentRun).toHaveBeenCalledWith('10001', 'what is dsh?')
   })
+
+  it('分段回发默认只发思考结果,不发思考过程(streamReasoning 可开)', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+
+    // 默认:reasoning 分段被过滤,只有 text 分段和最终结果回发
+    const sent: string[] = []
+    const execDefault = {
+      run: vi.fn(async (_k: string, _p: string, onChunk?: (t: string, k: 'text' | 'reasoning') => void) => {
+        onChunk?.('开始思考', 'reasoning')
+        onChunk?.('这是结果', 'text')
+        return '最终完整结果'
+      }),
+    }
+    const routerDefault = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    routerDefault.register(new AgentRpcHandler(execDefault as never))
+    await routerDefault.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    expect(sent).toEqual(['这是结果', '最终完整结果'])
+
+    // streamReasoning=true:reasoning 分段也回发
+    const sent2: string[] = []
+    const execOpen = {
+      run: vi.fn(async (_k: string, _p: string, onChunk?: (t: string, k: 'text' | 'reasoning') => void) => {
+        onChunk?.('开始思考', 'reasoning')
+        onChunk?.('这是结果', 'text')
+        return '最终完整结果'
+      }),
+    }
+    const routerOpen = new MessageRouter(gate, async (_, __, text) => void sent2.push(text))
+    routerOpen.register(new AgentRpcHandler(execOpen as never, { streamReasoning: true }))
+    await routerOpen.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    expect(sent2).toEqual(['开始思考', '这是结果', '最终完整结果'])
+  })
 })
