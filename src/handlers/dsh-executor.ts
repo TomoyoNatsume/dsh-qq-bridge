@@ -37,6 +37,12 @@ export function extractLastAssistantText(events: readonly unknown[]): string | n
 export interface DshRenderedAgent {
   followup(message: { id: string; role: string; content: unknown; source: unknown }): void
   whenIdle(): Promise<void>
+  /**
+   * 读取该 live agent 会话的**实时**事件(即会话已提交的日志)。
+   * 若实现提供,executor 优先用它提取回复,避免走持久化 corpus 的滞后;
+   * 未提供则回退到 `DshServiceHandles.readSurface(sessionId)`。
+   */
+  readSurface?(): Promise<readonly unknown[]>
   /** 销毁该会话底层的 DSH agent(释放资源)。 */
   dispose(): Promise<void>
 }
@@ -89,8 +95,25 @@ export class DshAgentExecutor implements AgentExecutor {
     }
 
     await this.dsh.deliver(agent, payload)
-    const events = await this.dsh.readSurface(sessionId)
-    return extractLastAssistantText(events) ?? '(agent produced no text)'
+    const events = await this.readEvents(agent, sessionId)
+    const text = extractLastAssistantText(events)
+    if (text === null && ['1', 'true'].includes((process.env.DSH_QQ_DEBUG ?? '').toLowerCase())) {
+      // 调试图:写入实际 surface 事件到 /tmp,便于排查 assistant 回复形态。
+      try {
+        const fs = await import('node:fs')
+        fs.writeFileSync('/tmp/dsh-qq-surface.json', JSON.stringify(events, null, 2))
+      } catch { /* noop */ }
+    }
+    return text ?? '(agent produced no text)'
+  }
+
+  /** 优先读 live agent 的实时会话日志,缺省则退回持久化 surface。 */
+  private async readEvents(agent: DshRenderedAgent, sessionId: string): Promise<readonly unknown[]> {
+    if (typeof agent.readSurface === 'function') {
+      const live = await agent.readSurface()
+      if (live && live.length) return live
+    }
+    return this.dsh.readSurface(sessionId)
   }
 
   /** 主动丢弃某个会话的 live agent。 */

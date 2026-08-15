@@ -121,6 +121,12 @@ function wireDsh(ctx: DshCtx) {
         async whenIdle() {
           await handle.agent.whenIdle()
         },
+        async readSurface() {
+          // 读 live agent 会话的实时已提交日志(session.events)。
+          // 比走持久化 corpus 的 sessionQuery.readSurface 更及时(避免 whenIdle 后未 flush 的滞后)。
+          const events = (handle.agent as { session?: { events?: readonly unknown[] } }).session?.events
+          return events ?? []
+        },
         async dispose() {
           await handle.dispose()
         },
