@@ -136,13 +136,32 @@ function wireDsh(ctx: DshCtx) {
     async deliver(agent: DshRenderedAgent, prompt: string) {
       // DSH 要求 user message 是「identified」的:必须带 id、role、source.kind。
       // 缺失 id 或 source 用 type 而非 kind,会在 session 校验时抛 「lacks an identified message」。
-      agent.followup({
+      const msg = {
         id: randomUUID(),
         role: 'user',
         content: [{ type: 'text', text: prompt }],
         source: { kind: 'user' },
-      })
-      await agent.whenIdle()
+      }
+      agent.followup(msg)
+      try {
+        await agent.whenIdle()
+      } catch (err) {
+        // 调试图:turn 失败时落盘完整会话日志 + 错误详情。
+        try {
+          const fs = await import('node:fs')
+          const dir = '/home/liangyihao/temp/dsh-qq-bridge'
+          fs.writeFileSync(`${dir}/.debug-turn-error.json`, JSON.stringify({
+            error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
+            delivered: msg,
+          }, null, 2))
+          const events = (agent as unknown as { readSurface?: () => Promise<readonly unknown[]> }).readSurface
+          if (typeof events === 'function') {
+            const evts = await events()
+            fs.writeFileSync(`${dir}/.debug-turn-log.json`, JSON.stringify(evts, null, 2))
+          }
+        } catch { /* noop */ }
+        throw err
+      }
     },
 
     async readSurface(sessionId: string) {
