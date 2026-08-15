@@ -16,10 +16,18 @@ export interface Transport {
 
 /**
  * 基于 `ws` 库的默认传输实现(连接 NapCat 的 onebot 正向 WS)。
+ * 内置断线自动重连:`connect()` 在首次连上时 resolve;首次失败则 reject(供上层打引导),
+ * 此后后台仍按退避自动重连。已在运行的连接意外断开也会自动重连,无需上层干预。
  */
 export class WsTransport implements Transport {
   private ws: import('ws').WebSocket | null = null
   private listeners = new Set<(frame: Record<string, unknown>) => void>()
+  private disposed = false
+  private retryTimer: NodeJS.Timeout | null = null
+  private attempts = 0
+  /** 首个连接尝试是否已经给出最终结论(open resolve / error reject)。 */
+  private initialSettled = false
+  private settleInitial: ((resolve: boolean) => void) | null = null
 
   constructor(private readonly url: string, private readonly token?: string) {}
 
@@ -28,26 +36,77 @@ export class WsTransport implements Transport {
   }
 
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // 动态 import,设备依赖保留可选;测试走 mock transport
-      void import('ws').then(({ WebSocket }) => {
-        const ws = new WebSocket(this.url, { headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined })
-        this.ws = ws
-        ws.on('open', () => resolve())
-        ws.on('message', (data: import('ws').RawData) => {
-          try {
-            const frame = JSON.parse(String(data)) as Record<string, unknown>
-            for (const cb of this.listeners) cb(frame)
-          } catch {
-            // 忽略非 JSON 帧
-          }
-        })
-        ws.on('error', (err) => reject(err))
-        ws.on('close', () => {
-          this.ws = null
-        })
-      })
+    if (this.connected) return Promise.resolve()
+    this.disposed = false
+    return new Promise<void>((resolve, reject) => {
+      this.settleInitial = (ok: boolean) => (ok ? resolve() : reject(new Error(`onebot ws connect failed: ${this.url}`)))
+      this.openSocket(true)
     })
+  }
+
+  private openSocket(firstAttempt: boolean): void {
+    void import('ws').then(({ WebSocket }) => {
+      if (this.disposed) return
+      let ws: import('ws').WebSocket
+      try {
+        ws = new WebSocket(this.url, {
+          headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined,
+        })
+      } catch (err) {
+        this.handleError('ws-new-failed', err)
+        return
+      }
+      this.ws = ws
+      ws.on('open', () => {
+        if (this.disposed) {
+          try { ws.close() } catch { /* noop */ }
+          return
+        }
+        this.attempts = 0 // 成功即重置退避
+        if (firstAttempt) this.resolveInitial(true)
+      })
+      ws.on('message', (data: import('ws').RawData) => {
+        try {
+          const frame = JSON.parse(String(data)) as Record<string, unknown>
+          for (const cb of this.listeners) cb(frame)
+        } catch {
+          // 忽略非 JSON 帧
+        }
+      })
+      ws.on('error', (err) => this.handleError('ws-error', err))
+      ws.on('close', () => this.handleClose())
+    })
+  }
+
+  private resolveInitial(ok: boolean): void {
+    if (this.initialSettled) return
+    this.initialSettled = true
+    const fn = this.settleInitial
+    this.settleInitial = null
+    fn?.(ok)
+  }
+
+  private handleError(reason: string, err: unknown): void {
+    void reason
+    void err
+    if (this.initialSettled === false) this.resolveInitial(false) // 首次连接失败 -> reject
+    this.scheduleRetry()
+  }
+
+  private handleClose(): void {
+    this.ws = null
+    if (this.disposed) return
+    this.scheduleRetry()
+  }
+
+  private scheduleRetry(): void {
+    if (this.disposed || this.retryTimer) return
+    this.attempts += 1
+    const delay = Math.min(500 * 2 ** this.attempts, 15000)
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      this.openSocket(false)
+    }, delay)
   }
 
   send(frame: Record<string, unknown>): Promise<void> {
@@ -64,9 +123,17 @@ export class WsTransport implements Transport {
 
   dispose(): Promise<void> {
     return new Promise((resolve) => {
+      this.disposed = true
+      this.initialSettled = false
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer)
+        this.retryTimer = null
+      }
       this.ws?.close()
       this.ws = null
       this.listeners.clear()
+      this.settleInitial = null
+      this.attempts = 0
       resolve()
     })
   }

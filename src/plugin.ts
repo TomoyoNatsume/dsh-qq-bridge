@@ -31,58 +31,57 @@ interface DshCtx {
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
  * 依赖:agentLoop(注入,硬依赖);sessionQuery(可选)。
  */
-export default function (options: DshQqBridgeConfig) {
+export const name = 'dsh-qq-bridge'
+export const inject = ['agentLoop', 'sessionQuery']
+
+export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<() => Promise<void>> {
   const cfg = DshQqBridgeConfig.parse(options)
 
-  return {
-    name: 'dsh-qq-bridge',
-    inject: ['agentLoop'],
-    async apply(ctx: DshCtx): Promise<() => void> {
-      const gate = new AccessGate({
-        adminQq: cfg.access.adminQq,
-        allowlist: cfg.access.allowlist,
-        commandPrefix: cfg.access.commandPrefix,
-        mode: cfg.access.mode,
-      })
+  const gate = new AccessGate({
+    adminQq: cfg.access.adminQq,
+    allowlist: cfg.access.allowlist,
+    commandPrefix: cfg.access.commandPrefix,
+    mode: cfg.access.mode,
+  })
 
-      const transport: Transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token)
-      const client = new OnebotClient(transport)
+  const transport: Transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token)
+  const client = new OnebotClient(transport)
 
-      const outbound: OutboundSender = async (scope, targetId, text) => {
-        if (scope === 'private') await client.sendPrivate(targetId, text)
-        else await client.sendGroup(targetId, text)
-      }
-      const router = new MessageRouter(gate, outbound)
+  const outbound: OutboundSender = async (scope, targetId, text) => {
+    if (scope === 'private') await client.sendPrivate(targetId, text)
+    else await client.sendGroup(targetId, text)
+  }
+  const router = new MessageRouter(gate, outbound)
 
-      const executor = makeDshExecutor(ctx)
-      const unregisterAgent = router.register(new AgentRpcHandler(executor))
+  const executor = makeDshExecutor(ctx)
+  const unregisterAgent = router.register(new AgentRpcHandler(executor))
 
-      let unregisterShell: () => void = () => {}
-      if (cfg.shell.enabled) {
-        unregisterShell = router.register(
-          new ShellHandler(async (cmd: string) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })),
-        )
-      }
+  let unregisterShell: () => void = () => {}
+  if (cfg.shell.enabled) {
+    unregisterShell = router.register(
+      new ShellHandler(async (cmd: string) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })),
+    )
+  }
 
-      // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
-      // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
-      const unsubMessages = client.onMessage((evt: OnebotMessageEvent) => {
-        void router.route(evt)
-      })
-      client.connect().catch((err) => {
-        console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err))
-      })
+  // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
+  // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
+  const unsubMessages = client.onMessage((evt: OnebotMessageEvent) => {
+    void router.route(evt)
+  })
+  client.connect().catch((err) => {
+    console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err))
+  })
 
-      return async () => {
-        unregisterAgent()
-        unregisterShell()
-        unsubMessages()
-        await executor.disposeAll() // 释放全部常驻 agent
-        await client.disconnect()
-      }
-    },
+  return async () => {
+    unregisterAgent()
+    unregisterShell()
+    unsubMessages()
+    await executor.disposeAll() // 释放全部常驻 agent
+    await client.disconnect()
   }
 }
+
+export default { name, inject, apply }
 
 function makeDshExecutor(ctx: DshCtx) {
   const handles = wireDsh(ctx)
