@@ -1,4 +1,5 @@
 import { OnebotClient, WsTransport, Transport } from './onebot/client.js'
+import { randomUUID } from 'node:crypto'
 import { MessageRouter, OutboundSender } from './router.js'
 import { AccessGate } from './security.js'
 import { AgentRpcHandler } from './handlers/agent.js'
@@ -9,7 +10,7 @@ import { OnebotMessageEvent } from './onebot/types.js'
 
 /** DSH live agent 最小画面。 */
 interface DshAgent {
-  followup(message: { content: unknown; source: unknown }): void
+  followup(message: { id: string; role: string; content: unknown; source: unknown }): void
   whenIdle(): Promise<void>
 }
 
@@ -127,7 +128,14 @@ function wireDsh(ctx: DshCtx) {
     },
 
     async deliver(agent: DshRenderedAgent, prompt: string) {
-      agent.followup({ content: [{ type: 'text', text: prompt }], source: { type: 'user' } })
+      // DSH 要求 user message 是「identified」的:必须带 id、role、source.kind。
+      // 缺失 id 或 source 用 type 而非 kind,会在 session 校验时抛 「lacks an identified message」。
+      agent.followup({
+        id: randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+        source: { kind: 'user' },
+      })
       await agent.whenIdle()
     },
 

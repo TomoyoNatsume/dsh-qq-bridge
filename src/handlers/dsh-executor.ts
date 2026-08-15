@@ -1,11 +1,27 @@
 import { AgentExecutor } from './agent.js'
 
-/** 提取 session surface 中最后一条 assistant 消息的纯文本。 */
+/**
+ * 提取 session surface 中最后一条 assistant 消息的纯文本。
+ *
+ * 兼容两种事件形状:
+ * - **DSH 真实形状**: `{ type, seq, data: { message: { content: [...] } }, ... }`
+ *   (assistant 消息体挂在 `data.message.content`)。
+ * - 简易形状(用于本地测试): `{ type: 'assistant/message', content: [...] }`。
+ */
 export function extractLastAssistantText(events: readonly unknown[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
-    const evt = events[i] as { type?: string; content?: readonly unknown[] } | null | undefined
-    if (!evt || evt.type !== 'assistant/message' || !Array.isArray(evt.content)) continue
-    const text = evt.content
+    const evt = events[i] as
+      | {
+          type?: string
+          content?: readonly unknown[]
+          data?: { message?: { content?: readonly unknown[] } }
+        }
+      | null
+      | undefined
+    if (!evt || evt.type !== 'assistant/message') continue
+    const blocks = evt.data?.message?.content ?? evt.content
+    if (!Array.isArray(blocks)) continue
+    const text = blocks
       .filter((b): b is { type: string; text: string } => {
         const blk = b as { type?: string; text?: string }
         return !!blk && blk.type === 'text' && typeof blk.text === 'string'
@@ -19,7 +35,7 @@ export function extractLastAssistantText(events: readonly unknown[]): string | n
 
 /** 一个可投料、等待、可释放销毁的 DSH agent 会话。 */
 export interface DshRenderedAgent {
-  followup(message: { content: unknown; source: unknown }): void
+  followup(message: { id: string; role: string; content: unknown; source: unknown }): void
   whenIdle(): Promise<void>
   /** 销毁该会话底层的 DSH agent(释放资源)。 */
   dispose(): Promise<void>
