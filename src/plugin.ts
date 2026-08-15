@@ -25,6 +25,8 @@ interface DshCtx {
   sessionQuery?: {
     readSurface(sessionId: string): Promise<{ events: readonly unknown[] }>
   }
+  /** cordis 事件订阅(session/event 广播)。 */
+  on?(event: string, cb: (subject: { id?: string }, event: unknown) => void): () => void
 }
 
 /**
@@ -118,6 +120,8 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
         },
         meta: { cwd: workdir() },
       })
+      // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
+      const session = (handle.agent as { session?: { id?: string } }).session
       return {
         followup(message) {
           handle.agent.followup(message)
@@ -134,10 +138,15 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
         async dispose() {
           await handle.dispose()
         },
-      }
+        _session: session,
+      } as DshRenderedAgent
     },
 
-    async deliver(agent: DshRenderedAgent, prompt: string) {
+    async deliver(
+      agent: DshRenderedAgent,
+      prompt: string,
+      onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
+    ) {
       // DSH 要求 user message 是「identified」的:必须带 id、role、source.kind。
       // 缺失 id 或 source 用 type 而非 kind,会在 session 校验时抛 「lacks an identified message」。
       const msg = {
@@ -146,6 +155,36 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
         content: [{ type: 'text', text: prompt }],
         source: { kind: 'user' },
       }
+
+      // 流式分段:订阅该会话的 session/event,收集 assistant/chunk 的文本增量。
+      let unsubscribe: (() => void) | undefined
+      const chunkBuf: { kind: 'text' | 'reasoning'; text: string }[] = []
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      const sessionId = (agent as unknown as { _session?: { id?: string } })._session?.id
+      const flush = () => {
+        if (flushTimer) {
+          clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        if (chunkBuf.length === 0 || !onChunk) return
+        const batch = chunkBuf.splice(0)
+        for (const { kind, text } of batch) onChunk(text, kind)
+      }
+      if (onChunk && ctx.on) {
+        unsubscribe = ctx.on('session/event', (subject, evt) => {
+          if (sessionId === undefined || subject?.id !== sessionId) return
+          const chunk = (evt as { type?: string; data?: { chunk?: { type?: string; text?: string } } }).data?.chunk
+          if (!chunk) return
+          if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
+            chunkBuf.push({ kind: 'text', text: chunk.text })
+          } else if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
+            chunkBuf.push({ kind: 'reasoning', text: chunk.text })
+          }
+          // 按 ~800ms 时间窗批量冲刷,避免逐 token 刷屏。
+          if (!flushTimer) flushTimer = setTimeout(flush, 800)
+        })
+      }
+
       agent.followup(msg)
       try {
         await agent.whenIdle()
@@ -164,8 +203,12 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
             fs.writeFileSync(`${dir}/.debug-turn-log.json`, JSON.stringify(evts, null, 2))
           }
         } catch { /* noop */ }
+        flush() // 先把已收集的分段发出去,再抛错
+        unsubscribe?.()
         throw err
       }
+      flush() // 收尾冲刷
+      unsubscribe?.()
     },
 
     async readSurface(sessionId: string) {

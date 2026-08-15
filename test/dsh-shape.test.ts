@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractLastAssistantText } from '../src/handlers/dsh-executor.js'
+import { extractLastAssistantText, DshAgentExecutor } from '../src/handlers/dsh-executor.js'
 
 /** DSH session surface 中 assistant/message 的真实形态:`data.message.content`。 */
 function dshAssistantEvent(blocks: unknown[]) {
@@ -57,6 +57,30 @@ describe('dsh-qq-bridge — DSH 真实消息形态兼容', () => {
     expect(msg.source.kind).toBe('user')
     expect((msg.content[0] as { type: string; text: string }).text).toBe('你好')
     void sid
+  })
+
+  it('流式分段:executor 将 onChunk 透传给 deliver,分段内容按序送达', async () => {
+    // 验证 DshAgentExecutor.run 的 onChunk 透传:deliver 收到回调后按 kind 分段推送。
+    let deliverGotChunk = false
+    const dsh2 = {
+      async getOrCreate() {
+        return { followup() {}, async whenIdle() {}, async dispose() {} }
+      },
+      async deliver(_a: unknown, _p: string, onChunk?: (t: string, k: 'text' | 'reasoning') => void) {
+        onChunk?.('思考中', 'reasoning')
+        onChunk?.('第一段', 'text')
+        deliverGotChunk = true
+      },
+      async readSurface() {
+        return [dshAssistantEvent([{ type: 'text', text: '最终' }])]
+      },
+    }
+    const exec2 = new DshAgentExecutor(dsh2 as never)
+    const chunks: string[] = []
+    const out2 = await exec2.run('private:1', 'hi', (t, k) => chunks.push(`${k}:${t}`))
+    expect(deliverGotChunk).toBe(true)
+    expect(chunks).toEqual(['reasoning:思考中', 'text:第一段'])
+    expect(out2).toBe('最终')
   })
 
   it('identified message 校验语义:source 必须是 { kind } 而非 { type }', () => {

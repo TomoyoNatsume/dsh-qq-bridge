@@ -37,7 +37,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
 
     const consumed = await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello world' }))
     expect(consumed).toBe(true)
-    expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello world')
+    expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello world', expect.any(Function))
     expect(sent).toEqual(['echo:hello world'])
   })
 
@@ -58,7 +58,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const router = new MessageRouter(gate, async (scope, id, text) => void sent.push(`${scope}#${id}#${text}`))
     router.register(new AgentRpcHandler({ run } as never))
     await router.route(makeEvent({ message_type: 'group', group_id: 555, user_id: 10001, raw_message: '/dsh task' }))
-    expect(run).toHaveBeenCalledWith('group:555', 'task')
+    expect(run).toHaveBeenCalledWith('group:555', 'task', expect.any(Function))
     expect(sent).toEqual(['group#555#r:task'])
   })
 

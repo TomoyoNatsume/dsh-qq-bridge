@@ -54,8 +54,15 @@ export interface DshRenderedAgent {
 export interface DshServiceHandles {
   /** 按 sessionKey 获取(已有)或创建(miss)一个 live agent。 */
   getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent>
-  /** 投递用户消息并等待本轮完成。 */
-  deliver(agent: DshRenderedAgent, prompt: string): Promise<void>
+  /**
+   * 投递用户消息并等待本轮完成。
+   * @param onChunk 可选分段回调:agent 产出过程中的文本增量,便于流式回发。
+   */
+  deliver(
+    agent: DshRenderedAgent,
+    prompt: string,
+    onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
+  ): Promise<void>
   /** 读取会话 surface(events)以提取本轮回复。 */
   readSurface(sessionId: string): Promise<readonly unknown[]>
 }
@@ -81,15 +88,23 @@ export class DshAgentExecutor implements AgentExecutor {
 
   constructor(private readonly dsh: DshServiceHandles) {}
 
-  async run(sessionKey: string, payload: string): Promise<string> {
+  async run(
+    sessionKey: string,
+    payload: string,
+    onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
+  ): Promise<string> {
     const prev = this.queues.get(sessionKey) ?? Promise.resolve()
-    const next = prev.then(() => this.runNow(sessionKey, payload))
+    const next = prev.then(() => this.runNow(sessionKey, payload, onChunk))
     // 吞掉队列尾部错误,避免串行链断掉后续消息
     this.queues.set(sessionKey, next.then(() => undefined, () => undefined))
     return next
   }
 
-  private async runNow(sessionKey: string, payload: string): Promise<string> {
+  private async runNow(
+    sessionKey: string,
+    payload: string,
+    onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
+  ): Promise<string> {
     const sessionIdExists = this.sessions.get(sessionKey)
     const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}-${this.bootSuffix}`
     this.sessions.set(sessionKey, sessionId)
@@ -100,7 +115,7 @@ export class DshAgentExecutor implements AgentExecutor {
       this.agents.set(sessionKey, agent)
     }
 
-    await this.dsh.deliver(agent, payload)
+    await this.dsh.deliver(agent, payload, onChunk)
     const events = await this.readEvents(agent, sessionId)
     const text = extractLastAssistantText(events)
     if (text === null) {

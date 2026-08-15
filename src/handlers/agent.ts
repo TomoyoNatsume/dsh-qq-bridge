@@ -9,8 +9,15 @@ export interface AgentExecutor {
   /**
    * 把 payload 交给一个 DSH Agent 会话处理,返回最终文本。
    * @param sessionKey 用于把同一 QQ 会话映射到固定 AgentId(多轮上下文)
+   * @param payload 用户消息
+   * @param onChunk 可选:agent 产出过程中的分段回调(流式返回)。
+   *        kind='text' 为最终回复文本增量;kind='reasoning' 为思考过程增量。
    */
-  run(sessionKey: string, payload: string): Promise<string>
+  run(
+    sessionKey: string,
+    payload: string,
+    onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
+  ): Promise<string>
 }
 
 /**
@@ -30,7 +37,11 @@ export class AgentRpcHandler implements Handler {
   async run(ctx: HandlerContext): Promise<void> {
     const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
     try {
-      const result = await this.executor.run(sessionKey, ctx.payload)
+      // 分段返回:agent 边产出边回发,用户不必等整轮结束。
+      const result = await this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
+        void ctx.respond(kind === 'reasoning' ? `[思考] ${chunk}` : chunk)
+      })
+      // 最终结果(若与已分段内容不同,回发最终完整版作为收尾)。
       await ctx.respond(result || '(no output)')
     } catch (err) {
       await ctx.respond(`agent error: ${err instanceof Error ? err.message : String(err)}`)
