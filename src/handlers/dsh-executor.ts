@@ -72,6 +72,12 @@ export class DshAgentExecutor implements AgentExecutor {
   private agents = new Map<string, DshRenderedAgent>()
   private sessions = new Map<string, string>() // sessionKey -> sessionId
   private queues = new Map<string, Promise<void>>()
+  /**
+   * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
+   * 避免跨 host 重启复用固定 sessionId 时,与磁盘上残留的旧会话发生 id collision。
+   * 同一 boot 内多轮上下文仍通过 sessionKey→sessionId 映射保持。
+   */
+  private readonly bootSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   constructor(private readonly dsh: DshServiceHandles) {}
 
@@ -85,7 +91,7 @@ export class DshAgentExecutor implements AgentExecutor {
 
   private async runNow(sessionKey: string, payload: string): Promise<string> {
     const sessionIdExists = this.sessions.get(sessionKey)
-    const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}`
+    const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}-${this.bootSuffix}`
     this.sessions.set(sessionKey, sessionId)
 
     let agent = this.agents.get(sessionKey)

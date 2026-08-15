@@ -30,7 +30,9 @@ function makeMock(repliesBySession: Record<string, unknown[]>) {
     },
     async deliver(_agent: DshRenderedAgent, _prompt: string) {},
     async readSurface(sessionId: string) {
-      return (repliesBySession[sessionId] ?? []) as never
+      // executor 的 sessionId 现带 boot 后缀(`qq-<hash>-<suffix>`),按前缀匹配 mock 键。
+      const key = Object.keys(repliesBySession).find((k) => sessionId.startsWith(k))
+      return (key !== undefined ? repliesBySession[key] : []) as never
     },
   }
   return { dsh, state }
@@ -89,7 +91,7 @@ describe('dsh-qq-bridge — DshAgentExecutor(多轮上下文)', () => {
     expect(exec.liveSessionCount).toBe(2)
     await exec.disposeSession('private:10001')
     expect(exec.liveSessionCount).toBe(1)
-    expect(state.drops).toContain(sid)
+    expect(state.drops.some((s) => s.startsWith(sid))).toBe(true)
   })
 
   it('并发消息按 sessionKey 串行,不并驱同一会话', async () => {
