@@ -12,3 +12,6 @@ coverage/
 
 # os
 .DS_Store
+
+# debug dumps
+.debug-*.json
