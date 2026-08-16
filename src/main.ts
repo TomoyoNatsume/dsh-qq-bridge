@@ -21,6 +21,8 @@ import { DshAgentExecutor } from './handlers/dsh-executor.js'
 import { ShellHandler } from './handlers/shell.js'
 import { DshQqBridgeConfig } from './config.js'
 import { buildConnectGuidance } from './plugin.js'
+import { NapcatSelfLogInput } from './inputs/napcat-log.js'
+import { homedir } from 'node:os'
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -40,6 +42,12 @@ function main(): void {
       allowlist: [],
       commandPrefix: process.env.DSH_QQ_PREFIX ?? '/dsh',
       mode: 'whitelist',
+    },
+    selfLogInput: {
+      enabled: process.env.DSH_QQ_SELF_LOG === '1' || process.env.DSH_QQ_SELF_LOG === 'true',
+      logPath: process.env.DSH_QQ_SELF_LOG_PATH ?? undefined,
+      pollIntervalMs: envInt('DSH_QQ_SELF_LOG_INTERVAL_MS', 1000),
+      replayOnStart: process.env.DSH_QQ_SELF_LOG_REPLAY === '1' || process.env.DSH_QQ_SELF_LOG_REPLAY === 'true',
     },
   })
 
@@ -89,8 +97,24 @@ function main(): void {
     })
   client.onMessage((evt) => void router.route(evt))
 
+  let selfLogInput: NapcatSelfLogInput | undefined
+  if (cfg.selfLogInput.enabled) {
+    const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`
+    selfLogInput = new NapcatSelfLogInput({
+      logPath,
+      selfQq: cfg.access.adminQq,
+      commandPrefix: cfg.access.commandPrefix,
+      pollIntervalMs: cfg.selfLogInput.pollIntervalMs,
+      replayOnStart: cfg.selfLogInput.replayOnStart,
+    })
+    void selfLogInput.start((evt) => void router.route(evt)).then(() => {
+      console.log(`[dsh-qq-bridge] self log input enabled: ${logPath}`)
+    })
+  }
+
   const shutdown = () => {
     console.log('\n[dsh-qq-bridge] 关闭中…')
+    selfLogInput?.stop()
     void executor.disposeAll().finally(() => client.disconnect())
     process.exit(0)
   }

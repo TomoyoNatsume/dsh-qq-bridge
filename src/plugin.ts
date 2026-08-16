@@ -7,6 +7,8 @@ import { DshAgentExecutor, DshRenderedAgent } from './handlers/dsh-executor.js'
 import { ShellHandler } from './handlers/shell.js'
 import { DshQqBridgeConfig } from './config.js'
 import { OnebotMessageEvent } from './onebot/types.js'
+import { NapcatSelfLogInput } from './inputs/napcat-log.js'
+import { homedir } from 'node:os'
 
 /** DSH live agent 最小画面。 */
 interface DshAgent {
@@ -78,10 +80,26 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err))
   })
 
+  let selfLogInput: NapcatSelfLogInput | undefined
+  if (cfg.selfLogInput.enabled) {
+    const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`
+    selfLogInput = new NapcatSelfLogInput({
+      logPath,
+      selfQq: cfg.access.adminQq,
+      commandPrefix: cfg.access.commandPrefix,
+      pollIntervalMs: cfg.selfLogInput.pollIntervalMs,
+      replayOnStart: cfg.selfLogInput.replayOnStart,
+    })
+    selfLogInput.start((evt) => void router.route(evt)).catch((err) => {
+      console.warn(`[dsh-qq-bridge] self log input failed: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }
+
   return async () => {
     unregisterAgent()
     unregisterShell()
     unsubMessages()
+    selfLogInput?.stop()
     await executor.disposeAll() // 释放全部常驻 agent
     await client.disconnect()
   }

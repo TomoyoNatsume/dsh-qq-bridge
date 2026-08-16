@@ -79,15 +79,19 @@ export class AgentRpcHandler implements Handler {
   async run(ctx: HandlerContext): Promise<void> {
     const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
     try {
+      const streamedText: string[] = []
       // 分段返回:agent 边产出边回发,用户不必等整轮结束。
       // 默认只回发「思考结果」(kind='text');思考过程(reasoning)默认忽略,
       // 避免逐 token 的思考增量在聊天框刷屏。可用 streamReasoning 开启。
       const result = await this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
         if (kind === 'reasoning' && !this.opts.streamReasoning) return
+        if (kind === 'text') streamedText.push(chunk)
         void this.respondChunk(ctx, chunk)
       })
-      // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
       const final = result || '(no output)'
+      // 若流式 text 分段已经覆盖最终结果,不再重复发送最终完整版。
+      if (streamedText.join('').trim() === final.trim()) return
+      // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
       await this.respondChunk(ctx, final)
     } catch (err) {
       await this.respondChunk(ctx, `agent error: ${err instanceof Error ? err.message : String(err)}`)

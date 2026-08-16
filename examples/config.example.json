@@ -17,5 +17,11 @@
   },
   "shell": {
     "enabled": false
+  },
+  "selfLogInput": {
+    "enabled": false,
+    "logPath": "",
+    "pollIntervalMs": 1000,
+    "replayOnStart": false
   }
 }

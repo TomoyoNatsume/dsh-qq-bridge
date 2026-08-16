@@ -118,6 +118,22 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(sent2).toEqual(['开始思考', '这是结果', '最终完整结果'])
   })
 
+  it('流式 text 已等于最终结果时不重复回发最终完整版', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const sent: string[] = []
+    const exec = {
+      run: vi.fn(async (_k: string, _p: string, onChunk?: (t: string, k: 'text' | 'reasoning') => void) => {
+        onChunk?.('最终', 'text')
+        onChunk?.('结果', 'text')
+        return '最终结果'
+      }),
+    }
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(exec as never))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    expect(sent).toEqual(['最终', '结果'])
+  })
+
   it('splitText:超长文本按 maxLen 拆分,且每条不超过限制', () => {
     const long = 'A'.repeat(100) + '。' + 'B'.repeat(100) + '。' + 'C'.repeat(100)
     const parts = splitText(long, 50)

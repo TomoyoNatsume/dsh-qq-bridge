@@ -35,7 +35,7 @@ bash napcat.sh --docker n --cli y
 
 > 若脚本中途问是否安装依赖 / 需要确认,选 **yes**。若脚本因网络慢而失败,可加 `--proxy 1` 走国内镜像重试。
 
-安装完成后,命令行会出现 `nc` 命令(TUI-CLI)。
+安装完成后,优先使用 `napcat` 管理命令启动和查看日志。不要直接运行 `nc`:在 Debian/Ubuntu 中 `nc` 通常是 OpenBSD netcat,不是 NapCat。
 
 ---
 
@@ -44,14 +44,8 @@ bash napcat.sh --docker n --cli y
 **保持你的终端,执行:**
 
 ```bash
-nc
-```
-
-或直接启动底层进程(若 `nc` 未装好):
-
-```bash
-cd ~/Napcat
-./start.sh   # 或脚本提示的启动方式
+napcat start <机器人小号QQ>
+napcat log <机器人小号QQ>
 ```
 
 启动后,**终端会打印一个 QR 登录二维码**。此时:
@@ -59,13 +53,39 @@ cd ~/Napcat
 2. 手机上确认登录。
 3. 终端提示登录成功后,QQ 小号即上线,NapCat 开始工作。
 
+如果 `napcat: command not found`,重新打开一个终端再试;仍不行就查看安装器最后输出的实际启动路径。若你运行 `nc` 看到 `OpenBSD netcat (Debian patchlevel ...)`,说明调用到的是系统 netcat,不是 NapCat。
+
 > ⚠️ 如果你不想让登录状态在每次重启后丢失,可在登录成功后**启用「快速登录」或固定 pad 票据**;否则每次重启可能要重新扫码。
 
 ---
 
-## 第 3 步:开启 OneBot 正向 WebSocket(端口 3001)
+## 第 3 步:进入 WebUI 并开启 OneBot 正向 WebSocket(端口 3001)
 
-在 TUI(`nc`)里,或用 NapCat 的配置界面,开启**正向 WebSocket(Forward WebSocket)**,设置为:
+先打开 NapCat WebUI。默认地址通常是:
+
+```text
+http://127.0.0.1:6099
+```
+
+WSL2 本机部署时,也可以在 Windows 浏览器里打开:
+
+```text
+http://localhost:6099
+```
+
+WebUI 登录 token 通常会打印在 NapCat 日志中:
+
+```bash
+napcat log <机器人小号QQ>
+```
+
+也可以尝试读取配置文件:
+
+```bash
+cat ~/Napcat/config/webui.json
+```
+
+进入 WebUI 后,开启**正向 WebSocket(Forward WebSocket)**,设置为:
 
 ```text
 监听端口: 3001
@@ -159,7 +179,7 @@ napcat startup 3678586949
 ```bash
 # 用 tmux 保活(简单)
 tmux new -s napcat
-# 在 tmux 里启动 nc / 启动脚本,然后 Ctrl+b d 脱离
+# 在 tmux 里运行 napcat start/log 或安装器提示的启动脚本,然后 Ctrl+b d 脱离
 ```
 
 这样即使关掉 SSH/WSL 窗口,NapCat 也会继续跑。
@@ -172,5 +192,6 @@ tmux new -s napcat
 |------|------|
 | 装依赖要 sudo | 你已在 WSL2 用户 shell,输入你的密码即可 |
 | 扫码后提示登录失败/风控 | 用专用小号、开启设备锁;官方客户端风控属正常现象 |
+| WebUI 打不开 | 先 `napcat status <QQ号>` / `napcat start <QQ号>` / `napcat log <QQ号>`,确认日志里的 WebUI 端口 |
 | 端口占满 | 换一个端口并在插件 `wsUrl` 里同步 |
 | 控制台没二维码 | 确认用的是交互终端,且启动了正确进程 |

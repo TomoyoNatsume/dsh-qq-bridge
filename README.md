@@ -65,6 +65,22 @@ npm test          # 单元 + 本地回环集成测试,无需 QQ 小号
 npx tsc -p tsconfig.json --noEmit   # 类型检查
 ```
 
+## 从 clone 到首次跑通
+
+给终端用户的最短流程见 [`docs/start-from-clone.md`](docs/start-from-clone.md):
+
+```bash
+DSH_QQ_ADMIN=<你的主号QQ> bash scripts/start-local-echo.sh
+```
+
+该脚本会安装依赖、编译并启动本地回显模式。NapCat 安装、扫码登录机器人小号、开启 OneBot 正向 WS 的步骤也在文档中。
+
+实验性的单号 / 我的电脑模式可加:
+
+```bash
+DSH_QQ_ADMIN=<你的QQ号> DSH_QQ_SELF_LOG=true bash scripts/start-local-echo.sh
+```
+
 ### 独立 CLI 入口(无 DSH 回显模式)
 
 项目提供 `src/main.ts`(`npm run build` 后 `npm start`),用于在未接真实 DSH 时先打通 QQ↔插件链路:

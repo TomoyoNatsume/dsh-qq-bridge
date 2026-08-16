@@ -33,6 +33,18 @@ const DshQqBridgeConfig = z.object({
       enabled: z.boolean().default(false),
     })
     .default({}),
+  selfLogInput: z
+    .object({
+      /** 实验性:tail NapCat 日志中的 self-sent 消息,用于单号/我的电脑场景。 */
+      enabled: z.boolean().default(false),
+      /** NapCat 日志路径;缺省按 ~/Napcat/log/napcat_<adminQq>.log 推导。 */
+      logPath: z.string().optional(),
+      /** 轮询间隔(ms)。 */
+      pollIntervalMs: z.number().int().positive().default(1000),
+      /** 启动时是否回放已有日志;默认只处理启动后的新行,避免误触发历史消息。 */
+      replayOnStart: z.boolean().default(false),
+    })
+    .default({}),
 })
 
 export type DshQqBridgeConfig = z.infer<typeof DshQqBridgeConfig>
