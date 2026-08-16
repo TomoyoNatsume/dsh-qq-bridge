@@ -2,8 +2,8 @@
 # NapCat 掉线守护:周期检测小号登录态,掉线自动重启 NapCat(快速登录自动重登)。
 #
 # 用法:
-#   bash scripts/keep-napcat-alive.sh           # 前台运行(用 tmux/nohup 保活)
-#   bash scripts/keep-napcat-alive.sh --once    # 只检测一次(供 cron 用)
+#   DSH_QQ_BOT=<机器人小号QQ> DSH_QQ_TOKEN=<onebot token> bash scripts/keep-napcat-alive.sh
+#   DSH_QQ_BOT=<机器人小号QQ> bash scripts/keep-napcat-alive.sh --once
 #
 # 原理:
 # - 通过 onebot API get_login_info 检测登录态(比只看进程更准:进程活但被风控踢下线也算掉线)。
@@ -12,11 +12,16 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-QQ="${DSH_QQ_BOT:-3678586949}"                    # 机器人小号
+QQ="${DSH_QQ_BOT:-}"                              # 机器人小号
 WS_URL="${DSH_QQ_WS:-ws://127.0.0.1:3001}"
-TOKEN="${DSH_QQ_TOKEN:-KQLITQUqweSF7sHP}"         # onebot token(与插件一致)
+TOKEN="${DSH_QQ_TOKEN:-}"                         # onebot token(与插件一致)
 CHECK_INTERVAL="${DSH_QQ_CHECK_INTERVAL:-60}"     # 秒
 LOG="${DSH_QQ_ALIVE_LOG:-/tmp/napcat-alive.log}"  # 默认 /tmp(避免 $HOME 只读)
+
+if [[ -z "$QQ" ]]; then
+  echo "请先设置 DSH_QQ_BOT=<机器人小号QQ>" >&2
+  exit 2
+fi
 
 check_once() {
   # 1) QQ 进程必须在
@@ -28,7 +33,9 @@ check_once() {
   #    在项目目录跑,确保 node 能解析 ws 模块
   (cd "$HERE" && node --input-type=module -e "
     import WebSocket from 'ws'
-    const ws = new WebSocket('${WS_URL}', { headers: { Authorization: 'Bearer ${TOKEN}' } })
+    const token = '${TOKEN}'
+    const headers = token ? { Authorization: 'Bearer ' + token } : undefined
+    const ws = new WebSocket('${WS_URL}', headers ? { headers } : undefined)
     const done = (code, msg) => { console.log(msg); try{ws.close()}catch{}; process.exit(code) }
     ws.on('open', () => ws.send(JSON.stringify({ action: 'get_login_info', echo: 'alive' })))
     ws.on('message', (d) => {

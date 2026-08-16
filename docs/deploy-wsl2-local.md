@@ -127,10 +127,10 @@ DSH_QQ_WS_URL=ws://127.0.0.1:3001 DSH_QQ_ADMIN=<你的主号QQ> npm start
 
 在本机已完成并通过:
 
-- 扫描登录小号成功(登录号 `3678586949`,昵称「DSH bot LYH」,NapCat WebUI 在 `http://localhost:6099`,token 见 `config/webui.json`)。
+- 扫描登录小号成功(登录号 `<机器人小号QQ>`,NapCat WebUI 在 `http://localhost:6099`,token 见 `config/webui.json`)。
 - 正向 WS 已配:端口 **3001**,服务名「DSH-QQ-Bridge」,已设访问 token(必须由插件通过 `Authorization: Bearer <token>` 携带,否则握手返回 `retcode 1403 token验证失败`)。
 - 插件连接、鉴权、API 往返均验证通过(`get_login_info` 返回正确 user_id)。
-- 端到端已通:主号 `554616801` 发 `/dsh ping`,机器人小号回发 `echo: ping`。
+- 端到端已通:主号 `<你的主号QQ>` 发 `/dsh ping`,机器人小号回发 `echo: ping`。
 
 > ⚠️ **安全提醒**:本机 NapCat 的 WS token 与 WebUI token 属敏感凭证,不要提交进 Git。正式对外使用时建议在 WebUI 轮换并改用环境变量注入。
 
@@ -140,13 +140,13 @@ DSH_QQ_WS_URL=ws://127.0.0.1:3001 DSH_QQ_ADMIN=<你的主号QQ> npm start
 
 ```bash
 # 启动 / 状态 / 查看日志(登录二维码与登录成功会在这里打印)
-napcat start 3678586949
-napcat status 3678586949
-napcat log 3678586949            # tail -f 等
+napcat start <机器人小号QQ>
+napcat status <机器人小号QQ>
+napcat log <机器人小号QQ>            # tail -f 等
 # 停止 / 重启 / 开机自启
-napcat stop 3678586949
-napcat restart 3678586949
-napcat startup 3678586949
+napcat stop <机器人小号QQ>
+napcat restart <机器人小号QQ>
+napcat startup <机器人小号QQ>
 ```
 
 - **小号掉线恢复**:若 NapCat 进程停止(`napcat status` 显示无服务),先 `napcat start <QQ号>` 拉起;若需重新扫码,看 `napcat log` 里的二维码,用手机 QQ 扫。

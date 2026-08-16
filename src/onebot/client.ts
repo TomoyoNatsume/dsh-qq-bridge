@@ -1,4 +1,5 @@
 import { OnebotActionResponse, OnebotMessageEvent } from './types.js'
+import { WebSocket, RawData } from 'ws'
 
 /**
  * 极简 WS 传输抽象,便于在测试中注入 mock(本地回环仿真),无需真实连接 NapCat。
@@ -12,6 +13,12 @@ export interface Transport {
   /** 订阅收到的 JSON 帧 */
   onFrame(cb: (frame: Record<string, unknown>) => void): () => void
   dispose(): Promise<void>
+}
+
+function normalizeToken(token: string | undefined): string | undefined {
+  const trimmed = token?.trim()
+  if (!trimmed || trimmed === 'undefined' || trimmed === 'null') return undefined
+  return trimmed
 }
 
 /**
@@ -28,8 +35,11 @@ export class WsTransport implements Transport {
   /** 首个连接尝试是否已经给出最终结论(open resolve / error reject)。 */
   private initialSettled = false
   private settleInitial: ((resolve: boolean) => void) | null = null
+  private readonly authToken: string | undefined
 
-  constructor(private readonly url: string, private readonly token?: string) {}
+  constructor(private readonly url: string, token?: string) {
+    this.authToken = normalizeToken(token)
+  }
 
   get connected(): boolean {
     return this.ws?.readyState === 1 // OPEN
@@ -45,36 +55,38 @@ export class WsTransport implements Transport {
   }
 
   private openSocket(firstAttempt: boolean): void {
-    void import('ws').then(({ WebSocket }) => {
-      if (this.disposed) return
-      let ws: import('ws').WebSocket
-      try {
-        ws = new WebSocket(this.url, {
-          headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined,
-        })
-      } catch (err) {
-        this.handleError('ws-new-failed', err)
+    if (this.disposed) return
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(this.url, {
+        headers: this.authToken ? { Authorization: `Bearer ${this.authToken}` } : undefined,
+      })
+    } catch (err) {
+      this.handleError('ws-new-failed', err)
+      return
+    }
+    this.ws = ws
+    ws.on('open', () => {
+      if (this.disposed) {
+        try { ws.close() } catch { /* noop */ }
         return
       }
-      this.ws = ws
-      ws.on('open', () => {
-        if (this.disposed) {
-          try { ws.close() } catch { /* noop */ }
-          return
-        }
-        this.attempts = 0 // 成功即重置退避
-        if (firstAttempt) this.resolveInitial(true)
-      })
-      ws.on('message', (data: import('ws').RawData) => {
-        try {
-          const frame = JSON.parse(String(data)) as Record<string, unknown>
-          for (const cb of this.listeners) cb(frame)
-        } catch {
-          // 忽略非 JSON 帧
-        }
-      })
-      ws.on('error', (err) => this.handleError('ws-error', err))
-      ws.on('close', () => this.handleClose())
+      this.attempts = 0 // 成功即重置退避
+      console.info(`[dsh-qq-bridge] onebot ws connected: ${this.url}`)
+      if (firstAttempt) this.resolveInitial(true)
+    })
+    ws.on('message', (data: RawData) => {
+      try {
+        const frame = JSON.parse(String(data)) as Record<string, unknown>
+        for (const cb of this.listeners) cb(frame)
+      } catch {
+        // 忽略非 JSON 帧
+      }
+    })
+    ws.on('error', (err) => this.handleError('ws-error', err))
+    ws.on('close', () => {
+      console.warn(`[dsh-qq-bridge] onebot ws closed: ${this.url}`)
+      this.handleClose()
     })
   }
 
@@ -87,8 +99,7 @@ export class WsTransport implements Transport {
   }
 
   private handleError(reason: string, err: unknown): void {
-    void reason
-    void err
+    console.warn(`[dsh-qq-bridge] onebot ${reason}: ${err instanceof Error ? err.message : String(err)}`)
     if (this.initialSettled === false) this.resolveInitial(false) // 首次连接失败 -> reject
     this.scheduleRetry()
   }

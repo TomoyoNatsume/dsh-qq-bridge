@@ -13,7 +13,11 @@
   },
   "agent": {
     "preset": "",
-    "model": ""
+    "provider": "deepseek-official",
+    "model": "deepseek-v4-flash",
+    "streamText": false,
+    "streamReasoning": false,
+    "maxMessageLength": 4500
   },
   "shell": {
     "enabled": false

@@ -29,4 +29,12 @@ describe('dsh-qq-bridge — 连接健康检查/引导', () => {
     const msg = buildConnectGuidance(cfg, 'boom')
     expect(msg).toContain('boom')
   })
+
+  it('agent preset 默认使用 DSH Web 的 standard preset', () => {
+    const parsed = DshQqBridgeConfig.parse({
+      napcat: { wsUrl: 'ws://127.0.0.1:3001' },
+      access: { adminQq: 1 },
+    })
+    expect(parsed.agent.preset).toBe('standard')
+  })
 })

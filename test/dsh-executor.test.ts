@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { DshAgentExecutor, extractLastAssistantText, hashKey, DshRenderedAgent } from '../src/handlers/dsh-executor.js'
+import { DshAgentExecutor, extractLastAssistantText, hashKey, DshRenderedAgent, isUnexecutedDsmlToolCall } from '../src/handlers/dsh-executor.js'
 
 function surfaceEvent(type: string, content: unknown[]) {
   return { type, content }
@@ -112,6 +112,28 @@ describe('dsh-qq-bridge — DshAgentExecutor(多轮上下文)', () => {
       surfaceEvent('assistant/message', [{ type: 'text', text: 'final' }]),
     ]
     expect(extractLastAssistantText(events)).toBe('final')
+  })
+
+  it('拦截未执行的 DSML 工具调用协议文本,避免透传给 QQ', async () => {
+    const sid = `qq-${hashKey('private:10001')}`
+    const { dsh } = makeMock({
+      [sid]: [
+        surfaceEvent('assistant/message', [{
+          type: 'text',
+          text: '<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="Bash">',
+        }]),
+      ],
+    })
+    const exec = new DshAgentExecutor(dsh as never)
+    const out = await exec.run('private:10001', '当前工作目录是什么')
+    expect(out).toContain('未被 DSH 执行的工具调用')
+    expect(out).not.toContain('<｜｜DSML｜｜tool_calls>')
+  })
+
+  it('isUnexecutedDsmlToolCall 识别 DSML tool_calls 标记', () => {
+    expect(isUnexecutedDsmlToolCall('<｜｜DSML｜｜tool_calls>')).toBe(true)
+    expect(isUnexecutedDsmlToolCall('<tool_calls>\n<invoke name="run_shell">')).toBe(true)
+    expect(isUnexecutedDsmlToolCall('normal answer')).toBe(false)
   })
 
   it('hashKey 稳定且区分', () => {

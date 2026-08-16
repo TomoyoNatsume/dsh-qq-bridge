@@ -55,7 +55,15 @@ export class MessageRouter {
 
     const targetId = scope === 'private' ? evt.user_id : evt.group_id!
     const respond = async (text: string): Promise<void> => {
-      await this.outbound(scope, targetId, text)
+      try {
+        await this.outbound(scope, targetId, text)
+      } catch (err) {
+        console.warn(
+          `[dsh-qq-bridge] failed to send ${scope} message to ${targetId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
     }
 
     const ctx: HandlerContext = {

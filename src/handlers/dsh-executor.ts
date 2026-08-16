@@ -33,6 +33,16 @@ export function extractLastAssistantText(events: readonly unknown[]): string | n
   return null
 }
 
+/**
+ * DSH 工具调用没有被运行时识别时,模型可能把 DSML 协议文本当普通 text 输出。
+ * 这类内容不是有效回复,也不应透传给 QQ 用户。
+ */
+export function isUnexecutedDsmlToolCall(text: string): boolean {
+  return text.includes('<｜｜DSML｜｜tool_calls>')
+    || text.includes('<||DSML||tool_calls>')
+    || /<tool_calls>\s*(?:<tool_calls>\s*)?<invoke\s+name=/i.test(text)
+}
+
 /** 一个可投料、等待、可释放销毁的 DSH agent 会话。 */
 export interface DshRenderedAgent {
   followup(message: { id: string; role: string; content: unknown; source: unknown }): void
@@ -118,6 +128,12 @@ export class DshAgentExecutor implements AgentExecutor {
     await this.dsh.deliver(agent, payload, onChunk)
     const events = await this.readEvents(agent, sessionId)
     const text = extractLastAssistantText(events)
+    if (text !== null && isUnexecutedDsmlToolCall(text)) {
+      return [
+        'agent 生成了一个未被 DSH 执行的工具调用,已拦截原始协议文本。',
+        '这通常是当前模型/工具调用模式不匹配导致的。请换用支持 native tool calling 的模型,或调整 DSH_TOOLS_MODE 后重试。',
+      ].join('\n')
+    }
     if (text === null) {
       // 调试图:提取不到文本时无条件落盘(写到 workspace 内,host 与开发侧都能访问)。
       try {

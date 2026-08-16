@@ -17,12 +17,15 @@ const DshQqBridgeConfig = z.object({
     .default({ adminQq: 0 }),
   agent: z
     .object({
-      preset: z.string().optional(),
+      /** DSH Web 的 agent preset;存在 agentPresets 服务时默认挂 standard。 */
+      preset: z.string().optional().default('standard'),
       /** 驱动 agent 的 provider 路由(须有已注册适配器)。 */
       provider: z.string().default('deepseek-official'),
       /** 驱动 agent 的模型 id(provider 适配器解释)。 */
       model: z.string().default('deepseek-v4-flash'),
-      /** 是否把思考过程(reasoning)也分段回发。默认 false:只回发思考结果,避免刷屏。 */
+      /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
+      streamText: z.boolean().default(false),
+      /** streamText=true 时,是否把思考过程(reasoning)也分段回发。默认 false。 */
       streamReasoning: z.boolean().default(false),
       /** 单条 QQ 消息最大长度(字符数);超长自动拆分为多条发送。QQ 官方单条约 5000 字,默认留余量。 */
       maxMessageLength: z.number().int().positive().default(4500),

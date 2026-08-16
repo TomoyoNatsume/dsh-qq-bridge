@@ -15,7 +15,7 @@ export type NapcatSelfLogHandler = (evt: OnebotMessageEvent) => void
  * Experimental input source for the "single QQ account + My Computer" flow.
  *
  * NapCat may log self-sent messages such as:
- *   08-16 11:07:50 [info] Tomoyo | 发送 -> 私聊 (554616801) /dsh hello
+ *   08-16 11:07:50 [info] Tomoyo | 发送 -> 私聊 (10001) /dsh hello
  *   08-16 11:10:40 [info] Tomoyo | 发送 -> 移动设备 /dsh hello
  *
  * In some setups these messages are not pushed as OneBot message events even
@@ -122,4 +122,3 @@ export function parseNapcatSelfLogLine(
 function stripAnsi(input: string): string {
   return input.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
 }
-

@@ -58,6 +58,8 @@ export class AgentRpcHandler implements Handler {
     private readonly executor: AgentExecutor,
     private readonly opts: {
       streamReasoning?: boolean
+      /** 是否边生成边回发 text 分段;默认 false,等待 agent 本轮完成后只发送最终回复。 */
+      streamText?: boolean
       /** 单条 QQ 消息最大长度;超长自动拆分为多条发送。 */
       maxMessageLength?: number
     } = {},
@@ -79,6 +81,13 @@ export class AgentRpcHandler implements Handler {
   async run(ctx: HandlerContext): Promise<void> {
     const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
     try {
+      if (!this.opts.streamText) {
+        // AgentExecutor.run resolve 即本轮完成标志:DSH executor 在内部等待 agent.whenIdle()。
+        const result = await this.executor.run(sessionKey, ctx.payload)
+        await this.respondChunk(ctx, result || '(no output)')
+        return
+      }
+
       const streamedText: string[] = []
       // 分段返回:agent 边产出边回发,用户不必等整轮结束。
       // 默认只回发「思考结果」(kind='text');思考过程(reasoning)默认忽略,

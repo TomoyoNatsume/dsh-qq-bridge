@@ -21,8 +21,16 @@ interface DshCtx {
   agentLoop?: {
     createAgent(
       ownerCtx: unknown,
-      options: { sessionId: string; agentOptions?: Record<string, unknown>; meta?: { cwd?: string } },
+      options: {
+        sessionId: string
+        agentOptions?: Record<string, unknown>
+        meta?: { cwd?: string; agentPreset?: string }
+        setup?: (agentCtx: unknown) => void | Promise<void>
+      },
     ): Promise<{ agent: DshAgent; dispose(): Promise<void> }>
+  }
+  agentPresets?: {
+    mount(agentCtx: unknown, preset?: string): Promise<void>
   }
   sessionQuery?: {
     readSurface(sessionId: string): Promise<{ events: readonly unknown[] }>
@@ -34,10 +42,10 @@ interface DshCtx {
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
- * 依赖:agentLoop(注入,硬依赖);sessionQuery(可选)。
+ * 依赖:agentLoop / agentPresets / sessionQuery。
  */
 export const name = 'dsh-qq-bridge'
-export const inject = ['agentLoop', 'sessionQuery']
+export const inject = ['agentLoop', 'agentPresets', 'sessionQuery']
 
 export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<() => Promise<void>> {
   const cfg = DshQqBridgeConfig.parse(options)
@@ -60,6 +68,7 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
 
   const executor = makeDshExecutor(ctx, cfg.agent)
   const unregisterAgent = router.register(new AgentRpcHandler(executor, {
+    streamText: cfg.agent.streamText,
     streamReasoning: cfg.agent.streamReasoning,
     maxMessageLength: cfg.agent.maxMessageLength,
   }))
@@ -132,6 +141,11 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
   return {
     async getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent> {
       void options.sessionKey
+      if (ctx.agentPresets && agentCfg?.preset) {
+        console.info(`[dsh-qq-bridge] mounting agent preset "${agentCfg.preset}" for ${options.sessionId}`)
+      } else if (agentCfg?.preset) {
+        console.warn(`[dsh-qq-bridge] agent preset "${agentCfg.preset}" requested but agentPresets service is unavailable`)
+      }
       const handle = await loop.createAgent(ctx, {
         sessionId: options.sessionId,
         // agent 的 model 路由必须显式给出,否则 prompt 组装时 `{{model}}` 无值。
@@ -139,7 +153,10 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
           ...(agentCfg?.provider ? { provider: agentCfg.provider } : {}),
           ...(agentCfg?.model ? { model: agentCfg.model } : {}),
         },
-        meta: { cwd: workdir() },
+        meta: { cwd: workdir(), ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
+        ...(ctx.agentPresets && agentCfg?.preset
+          ? { setup: async (agentCtx: unknown) => void await ctx.agentPresets!.mount(agentCtx, agentCfg.preset) }
+          : {}),
       })
       // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
       const session = (handle.agent as { session?: { id?: string } }).session
