@@ -17,11 +17,13 @@ QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 - 已安装好的 DSH / DeepSeek Harness，且知道它的项目目录。
 - DeepSeek API Key 已按 DSH 自身方式配置好。
 
+> 您可以将本项目（本文件）交给agent，让Ta帮您完成大部分配置工作。您只需完成扫码登陆QQ、配置Napcat WebUI等工作，根据您的agent引导即可。
+
 ## 1. clone 并构建插件
 
 ```bash
 git clone https://github.com/TomoyoNatsume/dsh-qq-bridge.git
-cd <你的 dsh-qq-bridge 目录>
+cd dsh-qq-bridge
 npm install
 npm run build
 ```
@@ -43,28 +45,31 @@ napcat start <你的QQ号>
 napcat log <你的QQ号>
 ```
 
-用手机 QQ 扫日志里的二维码完成登录。
+**用手机 QQ 扫日志里的二维码完成登录。**
 
-注意:不要运行 `nc`。在 Debian / Ubuntu 上，`nc` 通常是 OpenBSD netcat，不是 NapCat。
+>注意:不要运行 `nc`。在 Debian / Ubuntu 上，`nc` 通常是 OpenBSD netcat，不是 NapCat。
 
 ## 3. 进入 NapCat WebUI
 
 WebUI 默认地址通常是:
 
 ```text
-http://127.0.0.1:6099
+http://localhost:6099
 ```
 
 如果打不开，以 NapCat 日志里打印的地址为准:
 
 ```bash
 napcat log <你的QQ号>
+
+# 或者直接查看log文件：
+cat ~/Napcat/log/napcat_<你的QQ号>.log
 ```
 
 日志里一般会出现类似:
 
 ```text
-http://127.0.0.1:6099/webui?token=...
+http://localhost:6099/webui?token=...
 ```
 
 这里的 token 是 **WebUI 登录 token**，只用于打开 WebUI，不是后面插件用的 OneBot token。
@@ -77,7 +82,7 @@ http://127.0.0.1:6099/webui?token=...
 正向 WebSocket / Forward WebSocket
 监听地址: 127.0.0.1
 端口: 3001
-access token: 自己设置一个，后面 DSH_QQ_TOKEN 要填同一个
+access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ_TOKEN 要填同一个
 ```
 
 保存后保持 NapCat 运行。
