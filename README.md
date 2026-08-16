@@ -87,21 +87,17 @@ access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ
 
 保存后保持 NapCat 运行。
 
-## 5. 写 DSH patch 配置
+## 5. 配置 DSH web profile
 
-创建 `/tmp/dsh-qq-bridge-agent.patch.yml`:
+把插件写入 DSH 的 `web` profile。默认配置文件是:
+
+```text
+~/.dsh/profiles/web/cordis.patch.yml
+```
+
+如果这个文件目前只有 `[]`，可以替换成下面内容；如果已经有别的配置，就把 `insert` 这一段合并进去:
 
 ```yaml
-- id: webserver
-  config:
-    host: 127.0.0.1
-    port: 3081
-
-- id: llm-deepseek
-  config:
-    thinking: enabled
-    reasoningEffort: high
-
 - insert:
     - id: dsh-qq-bridge
       name: /path/to/dsh-qq-bridge/dist/index.js
@@ -117,6 +113,7 @@ access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ
         agent:
           provider: deepseek-official
           model: deepseek-v4-pro
+          preset: standard
           streamReasoning: false
           maxMessageLength: 4500
         shell:
@@ -139,7 +136,7 @@ access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ
 
 ## 6. 启动 DSH
 
-切到 DSH / DeepSeek Harness 项目目录执行，也就是包含 `apps/cli/src/bin.ts` 的目录:
+**需要重启DSH服务。**切到 DSH / DeepSeek Harness 项目目录执行:
 
 ```bash
 cd <你的 deepseek-harness 目录>
@@ -147,34 +144,25 @@ cd <你的 deepseek-harness 目录>
 export DSH_QQ_TOKEN='<NapCat OneBot access token>'
 export DSH_PERMISSION_MODE=danger-full-access
 
-setsid node --import tsx/esm apps/cli/src/bin.ts \
-  --profile web \
-  --patch /tmp/dsh-qq-bridge-agent.patch.yml \
-  > /tmp/dsh-qq-agent.log 2>&1 &
+pnpm dsh web
 ```
 
 `DSH_QQ_TOKEN` 填 WebUI 里正向 WebSocket 的 access token，不是 WebUI 登录链接里的 token。
 
 `DSH_PERMISSION_MODE=danger-full-access` 会让 DSH Agent 直接执行本机工具调用，不再卡在审批流程。只建议在私用、白名单只放自己的情况下使用。
 
-查看启动日志:
-
-```bash
-tail -f /tmp/dsh-qq-agent.log
-```
-
 看到下面几行就表示启动成功:
 
 ```text
 [dsh-qq-bridge] onebot ws connected: ws://127.0.0.1:3001
-dsh web: http://127.0.0.1:3081
+dsh web: http://127.0.0.1:3080
 [dsh-qq-bridge] mounting agent preset "standard"
 ```
 
-DSH WebUI 地址是:
+DSH WebUI 默认地址是:
 
 ```text
-http://127.0.0.1:3081
+http://127.0.0.1:3080
 ```
 
 ## 7. 用 QQ 验证
@@ -192,12 +180,18 @@ http://127.0.0.1:3081
 /dsh 列出当前工作目录下的目录和文件
 ```
 
-## 8. 查看和停止后台进程
+## 8. 停止 DSH
 
-查看 DSH 进程:
+如果是前台运行的 `pnpm dsh web`，在终端按:
+
+```text
+Ctrl+C
+```
+
+如果你把它放到后台运行了，再查进程:
 
 ```bash
-ps -eo pid,ppid,lstart,cmd | grep 'apps/cli/src/bin.ts' | grep -v grep
+ps -eo pid,ppid,lstart,cmd | grep -E 'pnpm dsh web|apps/cli/src/bin.ts' | grep -v grep
 ```
 
 停止:
@@ -206,7 +200,7 @@ ps -eo pid,ppid,lstart,cmd | grep 'apps/cli/src/bin.ts' | grep -v grep
 kill <PID>
 ```
 
-这里要 kill 的是 `ps` 查到的 node 进程 PID，不一定是 shell 打印的 job id。
+这里要 kill 的是 `ps` 查到的实际进程 PID，不一定是 shell 打印的 job id。
 
 ## 9. 常见问题
 
@@ -215,7 +209,6 @@ kill <PID>
 先看日志:
 
 ```bash
-tail -n 100 /tmp/dsh-qq-agent.log
 napcat log <你的QQ号>
 ```
 
@@ -237,6 +230,24 @@ export DSH_PERMISSION_MODE=danger-full-access
 ```
 
 重新 kill 旧进程，再按第 6 步启动。
+
+### 临时调试时想用一次性 patch 启动
+
+正式使用建议写入 `~/.dsh/profiles/web/cordis.patch.yml` 后执行 `pnpm dsh web`。临时调试时，也可以把同样的 patch 写到 `/tmp/dsh-qq-bridge-agent.patch.yml`，然后从 DSH 项目目录执行:
+
+```bash
+export DSH_QQ_TOKEN='<NapCat OneBot access token>'
+export DSH_PERMISSION_MODE=danger-full-access
+
+pnpm dsh web --patch /tmp/dsh-qq-bridge-agent.patch.yml
+```
+
+如果需要后台运行并写日志:
+
+```bash
+pnpm dsh web --patch /tmp/dsh-qq-bridge-agent.patch.yml \
+  > /tmp/dsh-qq-agent.log 2>&1 &
+```
 
 ### 返回 `<tool_calls>` 或 DSML 文本
 
