@@ -1,5 +1,9 @@
 # dsh-qq-bridge
 
+## 效果展示
+
+![QQ 验证成功截图](docs/asset/test1.png)
+
 从 clone 到 QQ 遥控 DSH 的最短流程。目标是:
 
 ```text
@@ -56,8 +60,9 @@ WebUI 默认地址通常是:
 ```text
 http://localhost:6099
 ```
+>注意wsl用户不要用127.0.0.1，而要用localhost
 
-如果打不开，以 NapCat 日志里打印的地址为准:
+如果打不开，以 NapCat 日志里打印的地址为准：
 
 ```bash
 napcat log <你的QQ号>
@@ -95,7 +100,7 @@ access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ
 ~/.dsh/profiles/web/cordis.patch.yml
 ```
 
-如果这个文件目前只有 `[]`，可以替换成下面内容；如果已经有别的配置，就把 `insert` 这一段合并进去:
+如果这个文件目前只有 `[]`，可以替换成下面内容；如果已经有别的配置，就把 `insert` 这一段合并进去(注意替换其中的qq号和log路径):
 
 ```yaml
 - insert:
@@ -158,6 +163,8 @@ pnpm dsh web
 dsh web: http://127.0.0.1:3080
 [dsh-qq-bridge] mounting agent preset "standard"
 ```
+
+![DSH 启动成功截图](docs/asset/test0.png)
 
 DSH WebUI 默认地址是:
 
