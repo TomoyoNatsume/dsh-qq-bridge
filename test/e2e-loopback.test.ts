@@ -116,8 +116,11 @@ describe('dsh-qq-bridge — M5 本地回环全链路', () => {
     // 让回发动作落地
     await new Promise((r) => setTimeout(r, 0))
     const sent = chain.transport.outbound
-    expect(sent).toHaveLength(1)
-    const frame = sent[0] as { action: string; params: { user_id: number; message: string } }
+    expect(sent).toHaveLength(2)
+    const ackFrame = sent[0] as { action: string; params: { user_id: number; message: string } }
+    expect(ackFrame.action).toBe('send_private_msg')
+    expect(ackFrame.params.message).toBe('收到，正在处理...')
+    const frame = sent[1] as { action: string; params: { user_id: number; message: string } }
     expect(frame.action).toBe('send_private_msg')
     expect(frame.params.user_id).toBe(10001)
     expect(frame.params.message).toContain('reply#0')
@@ -138,9 +141,9 @@ describe('dsh-qq-bridge — M5 本地回环全链路', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(chain.gotPrompts).toEqual(['hi', 'hi'])
-    // 两次回发,第二次 reply#1(说明上下文/会话延续)
+    // 每轮先 ack,再回发 reply;第二轮 reply#1(说明上下文/会话延续)
     const texts = chain.transport.outbound.map((f) => (f as { params: { message: string } }).params.message)
-    expect(texts).toEqual(['reply#0', 'reply#1'])
+    expect(texts).toEqual(['收到，正在处理...', 'reply#0', '收到，正在处理...', 'reply#1'])
   })
 
   it('群聊:回发 send_group_msg 到 group_id', async () => {
@@ -153,9 +156,10 @@ describe('dsh-qq-bridge — M5 本地回环全链路', () => {
       message_id: 3,
     })
     await new Promise((r) => setTimeout(r, 0))
-    const frame = chain.transport.outbound[0] as { action: string; params: { user_id?: number; group_id?: number } }
+    const frame = chain.transport.outbound[0] as { action: string; params: { user_id?: number; group_id?: number; message?: string } }
     expect(frame.action).toBe('send_group_msg')
     expect(frame.params.group_id).toBe(555)
+    expect(frame.params.message).toBe('收到，正在处理...')
   })
 
   it('白名单外的人被拒绝,无回发', async () => {

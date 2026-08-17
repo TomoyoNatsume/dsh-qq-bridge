@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 export interface BridgeProfileConfig {
   pluginName: string
   wsUrl: string
+  token: string
   adminQq: number
   commandPrefix: string
   provider: string
@@ -21,6 +22,7 @@ export interface ProfileUpdateResult {
 }
 
 const BRIDGE_ID = 'dsh-qq-bridge'
+const PERMISSION_ID = 'permission'
 
 export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
   const selfLog = cfg.selfLogEnabled
@@ -42,7 +44,7 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     '      config:',
     '        napcat:',
     `          wsUrl: ${cfg.wsUrl}`,
-    '          token: !!js process.env.DSH_QQ_TOKEN',
+    `          token: ${yamlQuote(cfg.token)}`,
     '        access:',
     `          adminQq: ${cfg.adminQq}`,
     '          allowlist: []',
@@ -54,13 +56,61 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     '          preset: standard',
     '          streamReasoning: false',
     '          maxMessageLength: 4500',
+    '          ackMessage: 收到，正在处理...',
+    '          timeoutMs: 120000',
+    '          timeoutMessage: agent 无响应，请稍后重试。',
     '        shell:',
     '          enabled: false',
     ...selfLog,
   ].join('\n')
 }
 
-export function updateProfilePatch(content: string, item: string): ProfileUpdateResult {
+export function updateSetupProfilePatch(content: string, bridgeItem: string): ProfileUpdateResult {
+  const normalized = normalizeLineEndings(content)
+  const withBridge = updateProfilePatch(normalized, bridgeItem, BRIDGE_ID)
+  const cleaned = removeInsertItem(withBridge.content, PERMISSION_ID)
+  const changed = cleaned.content !== normalized
+  return {
+    changed,
+    content: cleaned.content,
+    preview: makePreview(normalized, cleaned.content),
+    action: changed
+      ? withBridge.action === 'replaced' || cleaned.action === 'replaced'
+        ? 'replaced'
+        : 'added'
+      : 'unchanged',
+  }
+}
+
+export function removeInsertItem(content: string, itemId: string): ProfileUpdateResult {
+  const normalized = normalizeLineEndings(content)
+  let lines = normalized.split('\n')
+  let removed = false
+
+  while (true) {
+    const insertRanges = findTopLevelInsertRanges(lines)
+    let found = false
+    for (const range of insertRanges) {
+      const existing = findInsertItem(lines, range.start + 1, range.end, itemId)
+      if (!existing) continue
+      lines = [...lines.slice(0, existing.start), ...lines.slice(existing.end)]
+      removed = true
+      found = true
+      break
+    }
+    if (!found) break
+  }
+
+  const next = trimTrailingBlankLines(lines).join('\n') + '\n'
+  return {
+    changed: removed,
+    content: next,
+    preview: makePreview(normalized, next),
+    action: removed ? 'replaced' : 'unchanged',
+  }
+}
+
+export function updateProfilePatch(content: string, item: string, itemId = BRIDGE_ID): ProfileUpdateResult {
   const normalized = normalizeLineEndings(content)
   if (normalized.trim() === '[]' || normalized.trim() === '') {
     const next = ['- insert:', ...item.split('\n')].join('\n') + '\n'
@@ -75,7 +125,7 @@ export function updateProfilePatch(content: string, item: string): ProfileUpdate
   const insertRanges = findTopLevelInsertRanges(lines)
 
   for (const range of insertRanges) {
-    const existing = findBridgeItem(lines, range.start + 1, range.end)
+    const existing = findInsertItem(lines, range.start + 1, range.end, itemId)
     if (!existing) continue
 
     const replacement = item.split('\n')
@@ -151,9 +201,9 @@ function findNextTopLevelEntry(lines: string[], from: number): number {
   return lines.length
 }
 
-function findBridgeItem(lines: string[], from: number, to: number): { start: number; end: number } | null {
+function findInsertItem(lines: string[], from: number, to: number, itemId: string): { start: number; end: number } | null {
   for (let i = from; i < to; i++) {
-    const match = /^(\s*)-\s+id:\s+dsh-qq-bridge\s*$/.exec(lines[i])
+    const match = new RegExp(`^(\\s*)-\\s+id:\\s+${escapeRegExp(itemId)}\\s*$`).exec(lines[i])
     if (!match) continue
     const indent = match[1].length
     if (indent === 0) continue
@@ -225,4 +275,12 @@ function timestamp(): string {
     pad(now.getSeconds()),
     randomBytes(2).toString('hex'),
   ].join('')
+}
+
+function yamlQuote(value: string): string {
+  return JSON.stringify(value)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

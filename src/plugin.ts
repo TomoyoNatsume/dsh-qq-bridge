@@ -71,6 +71,9 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     streamText: cfg.agent.streamText,
     streamReasoning: cfg.agent.streamReasoning,
     maxMessageLength: cfg.agent.maxMessageLength,
+    ackMessage: cfg.agent.ackMessage,
+    timeoutMs: cfg.agent.timeoutMs,
+    timeoutMessage: cfg.agent.timeoutMessage,
   }))
 
   let unregisterShell: () => void = () => {}

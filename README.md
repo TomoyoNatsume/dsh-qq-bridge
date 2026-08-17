@@ -63,11 +63,13 @@ node dist/main.js setup
 
 - 校验 QQ 号格式、DSH / DeepSeek Harness 目录、NapCat 根目录。
 - 用上下键选择模型、是否启用单号模式、是否后台启动 DSH web。
-- 生成并写入 `~/.dsh/profiles/web/cordis.patch.yml`，只增改 `insert` 下的 `id: dsh-qq-bridge`，并保留写入前备份。
 - 检查 `napcat status <QQ>`；未启动时自动执行 `napcat start <QQ>`。
 - 打印 NapCat 日志路径和 `napcat log <QQ>`，让你自己打开日志扫码登录。
-- 自动配置 NapCat OneBot 正向 WebSocket: `127.0.0.1:3001`。
-- 可选后台启动 `pnpm dsh web`；如果 `http://127.0.0.1:3080` 已经可访问，会跳过启动，避免重复起服务。
+- 自动配置 NapCat OneBot 正向 WebSocket: `127.0.0.1:3001`，并创建或复用 OneBot access token。
+- 最后生成并写入 `~/.dsh/profiles/web/cordis.patch.yml`，只增改 `insert` 下的 `id: dsh-qq-bridge`，并保留写入前备份；如果 setup 中途退出，不会提前写入这个文件。
+- 写入 `~/.dsh/settings.yaml`，把后续新建 DSH Web 会话的默认权限设为 Full access。
+- 可选后台启动 DSH web；如果 `http://127.0.0.1:3080` 已经可访问，会跳过启动，避免重复起服务。后台启动会写 `/tmp/dsh-qq-bridge-dsh-web.pid` 和 `/tmp/dsh-qq-bridge-dsh-web.log`。
+- 完成时提示重新 setup 的触发条件。OneBot token 会写入本机的 `cordis.patch.yml`，DSH 默认权限会写入本机的 `settings.yaml`，重启 DSH web 时不需要再导出 `DSH_QQ_TOKEN` 或 `DSH_PERMISSION_MODE`。
 
 在普通终端中，选项题支持上下键选择、回车确认；如果运行环境不支持交互式 TTY，会自动退回到输入序号/文本的模式。输入不合法时会重复当前问题，不会直接退出。
 
@@ -78,9 +80,12 @@ node dist/main.js setup
 如果最后选择后台启动 DSH web，看到类似下面输出即表示服务已启动:
 
 ```text
-DSH web 已后台启动。PID: 12345
+DSH web 后台启动成功。
+管理 PID: 12345
 地址: http://127.0.0.1:3080
 日志: /tmp/dsh-qq-bridge-dsh-web.log
+启动命令: node --import tsx/esm apps/cli/src/bin.ts web
+管理命令: dsh-qq-bridge web status | dsh-qq-bridge web logs | dsh-qq-bridge web stop
 ```
 
 <img src="docs/asset/test0.png" alt="DSH 启动成功截图">
@@ -125,11 +130,35 @@ agent:
   provider: deepseek-official
   model: deepseek-v4-pro
   preset: standard
+  ackMessage: 收到，正在处理...
+  timeoutMs: 120000
+  timeoutMessage: agent 无响应，请稍后重试。
 ```
 
 - `provider`:DSH 里已配置好的模型提供方。
 - `model`:该 provider 下的模型 id。
 - `preset`:DSH agent preset，通常保持 `standard` 即可。
+
+### 更改处理提示和超时
+
+收到有效 QQ 指令后，插件会先回复一条确认消息:
+
+```yaml
+agent:
+  ackMessage: 收到，正在处理...
+```
+
+如果 Agent 长时间没有返回，插件会回复无响应提示:
+
+```yaml
+agent:
+  timeoutMs: 120000
+  timeoutMessage: agent 无响应，请稍后重试。
+```
+
+- `ackMessage`:收到指令后立即回复的消息；设为空字符串 `""` 可以关闭。
+- `timeoutMs`:等待 Agent 的最长时间，单位毫秒。
+- `timeoutMessage`:超时后回复给 QQ 的消息。
 
 ### 更改 QQ 指令前缀
 
@@ -253,20 +282,22 @@ access token: <随机 token>
 ```yaml
 napcat:
   wsUrl: ws://127.0.0.1:3001
-  token: !!js process.env.DSH_QQ_TOKEN
+  token: "<NapCat OneBot access token>"
 ```
 
 不要把 NapCat OneBot WS 监听地址改成 `0.0.0.0` 或公网 IP，除非你已经准备好防火墙、内网/VPN 隔离和强 token。
 
-### OneBot access token 不写进仓库
+### OneBot access token 只保存在本机配置
 
-`DSH_QQ_TOKEN` 是 NapCat 正向 WebSocket 的 access token，不是 WebUI 登录链接里的 token。README 示例用环境变量注入:
+setup 会把 NapCat 正向 WebSocket 的 access token 写入:
 
-```bash
-export DSH_QQ_TOKEN='<NapCat OneBot access token>'
+```text
+~/.dsh/profiles/web/cordis.patch.yml
 ```
 
-这样 token 不会写进 `cordis.patch.yml`、Git 历史或 release 包。不要把 QQ 凭据、NapCat WebUI token、OneBot access token、DeepSeek API Key 提交到仓库。
+这个 token 不是 NapCat WebUI 登录链接里的 token。正常重启 DSH web 不会改变它，也不需要导出 `DSH_QQ_TOKEN`；只有重新 setup、重新配置 OneBot token、重装/重配 NapCat，才需要重新写入。
+
+不要把 `~/.dsh/profiles/web/cordis.patch.yml`、QQ 凭据、NapCat WebUI token、OneBot access token、DeepSeek API Key 提交到仓库或公开日志。
 
 ### shell handler 默认关闭
 
@@ -292,13 +323,16 @@ selfLogInput:
 
 ### DSH 工具权限需要谨慎
 
-文档里使用:
+setup 会写入 DSH settings，让之后新建的 Web 会话默认使用 Full access:
 
-```bash
-export DSH_PERMISSION_MODE=danger-full-access
+```yaml
+permission:
+  defaultPreset: danger-full-access
 ```
 
 这是为了私用场景下让 DSH Agent 不再卡在工具审批。它本身权限很高，所以必须和 `whitelist`、`adminQq`、本机端口监听、OneBot token 一起使用；不要在开放 QQ 入口或公网端口时启用。
+
+如果想改回更保守的默认权限，修改 `~/.dsh/settings.yaml`，把 `defaultPreset` 改成 `workspace-write`，然后重启 DSH web。注意:这个默认值只影响之后新建的 Web 会话，不改变已经打开的会话。
 
 ## 6. 停止 DSH
 
@@ -308,19 +342,25 @@ export DSH_PERMISSION_MODE=danger-full-access
 Ctrl+C
 ```
 
-如果你把它放到后台运行了，再查进程:
+如果是 setup 帮你后台启动的，可以查看状态:
 
 ```bash
-ps -eo pid,ppid,lstart,cmd | grep -E 'pnpm dsh web|apps/cli/src/bin.ts' | grep -v grep
+dsh-qq-bridge web status
+```
+
+查看日志:
+
+```bash
+dsh-qq-bridge web logs
 ```
 
 停止:
 
 ```bash
-kill <PID>
+dsh-qq-bridge web stop
 ```
 
-这里要 kill 的是 `ps` 查到的实际进程 PID，不一定是 shell 打印的 job id。
+setup 管理的 pid 文件在 `/tmp/dsh-qq-bridge-dsh-web.pid`，日志在 `/tmp/dsh-qq-bridge-dsh-web.log`。如果不是用 setup 后台启动，而是自己前台执行 `pnpm dsh web`，仍然在那个终端按 `Ctrl+C` 停止。
 
 ## 7. 开源许可与致谢
 
@@ -354,29 +394,26 @@ napcat log <你的QQ号>
 
 - NapCat 是否还在线。
 - 正向 WebSocket 是否开启，端口是否是 `3001`。
-- `DSH_QQ_TOKEN` 是否等于 OneBot access token。
+- `~/.dsh/profiles/web/cordis.patch.yml` 里的 `napcat.token` 是否等于 OneBot access token。
 - 消息是否以 `/dsh` 开头。
 - `adminQq` 是否填的是发消息的 QQ。
 - 单号模式下 `selfLogInput.logPath` 是否正确。
 
 ### 发送后一直无回复
 
-如果 DSH 卡在工具审批，通常是没有设置:
+如果 DSH 卡在工具审批，通常是当前会话没有使用 Full access。先确认 `~/.dsh/settings.yaml` 中有:
 
-```bash
-export DSH_PERMISSION_MODE=danger-full-access
+```yaml
+defaultPreset: danger-full-access
 ```
 
-重新 kill 旧进程，再按向导启动，或手动执行 `pnpm dsh web`。
+然后重新 kill 旧进程并启动 `pnpm dsh web`，再新建/刷新 Web 会话。
 
 ### 临时调试时想用一次性 patch 启动
 
-正式使用建议写入 `~/.dsh/profiles/web/cordis.patch.yml` 后执行 `pnpm dsh web`。临时调试时，也可以把同样的 patch 写到 `/tmp/dsh-qq-bridge-agent.patch.yml`，然后从 DSH 项目目录执行:
+正式使用建议通过 setup 写入 `~/.dsh/profiles/web/cordis.patch.yml` 后执行 `pnpm dsh web`。临时调试时，也可以把一次性 patch 写到 `/tmp/dsh-qq-bridge-agent.patch.yml`，并在 patch 里写入 `napcat.token`，然后从 DSH 项目目录执行:
 
 ```bash
-export DSH_QQ_TOKEN='<NapCat OneBot access token>'
-export DSH_PERMISSION_MODE=danger-full-access
-
 pnpm dsh web --patch /tmp/dsh-qq-bridge-agent.patch.yml
 ```
 

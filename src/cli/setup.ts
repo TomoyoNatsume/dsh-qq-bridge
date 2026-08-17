@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildBridgeInsertItem, updateProfilePatch, writeProfilePatchWithBackup } from './dsh-profile.js'
+import { buildBridgeInsertItem, updateSetupProfilePatch, writeProfilePatchWithBackup } from './dsh-profile.js'
+import { updatePermissionDefaultPreset, writeSettingsWithBackup } from './dsh-settings.js'
 import {
   canAcceptUserConfirmedLogin,
   classifyNapcatLogin,
@@ -41,7 +42,6 @@ export async function runSetup(): Promise<void> {
     await preflight(prompt)
     const answers = await collectAnswers(prompt)
     const logPath = defaultNapcatLogPath(answers.qq, answers.napcatRoot)
-    await configureDshProfile(answers, logPath)
 
     const token = await configureNapcatEnvironment(prompt, answers.qq, answers.napcatRoot)
     if (!token) {
@@ -49,29 +49,45 @@ export async function runSetup(): Promise<void> {
       process.exitCode = 1
       return
     }
+    await configureDshProfile(answers, logPath, token)
+    await configureDshSettings()
 
     if (await prompt.confirm('是否后台启动 DSH web', true)) {
       const result = await startDshWebBackground({
         cwd: answers.dshCheckout,
-        token,
       })
-      if (result.alreadyRunning) {
+      if (result.alreadyRunning && result.ready) {
         console.log(`检测到 DSH web 已在运行: ${result.url}`)
+        if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
         console.log('已跳过后台启动，避免重复启动多个 DSH web。')
-      } else {
-        console.log(`DSH web 已后台启动。PID: ${result.pid ?? 'unknown'}`)
+      } else if (result.alreadyRunning) {
+        console.log('检测到 DSH web 管理进程正在运行，但服务暂不可访问。')
+        if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
         console.log(`地址: ${result.url}`)
         console.log(`日志: ${result.logPath}`)
+        console.log('请查看日志确认启动状态。')
+      } else if (result.ready) {
+        console.log('DSH web 后台启动成功。')
+        if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
+        console.log(`地址: ${result.url}`)
+        console.log(`日志: ${result.logPath}`)
+        console.log(`启动命令: ${result.command}`)
+      } else {
+        console.log('已尝试后台启动 DSH web。')
+        if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
+        console.log(`地址: ${result.url}`)
+        console.log(`日志: ${result.logPath}`)
+        console.log(`启动命令: ${result.command}`)
+        console.log('但 30 秒内未确认服务可访问，请查看日志确认启动状态。')
       }
+      console.log('管理命令: dsh-qq-bridge web status | dsh-qq-bridge web logs | dsh-qq-bridge web stop')
       console.log(`请在 QQ 发送: ${answers.commandPrefix} ping`)
       console.log(`如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`)
+      printSetupRefreshGuidance()
     } else {
-      console.log('\n之后可手动启动:')
-      console.log(`cd ${answers.dshCheckout}`)
-      console.log(`export DSH_QQ_TOKEN='<NapCat OneBot access token>'`)
-      console.log('export DSH_PERMISSION_MODE=danger-full-access')
-      console.log('pnpm dsh web')
+      console.log('\n之后可手动启动 DSH web。')
       console.log(`启动后发送 ${answers.commandPrefix} ping；如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`)
+      printSetupRefreshGuidance()
     }
   } catch (err) {
     console.error(`setup failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -140,12 +156,13 @@ async function resolveNapcatRoot(prompt: Prompter): Promise<string> {
   return promptExistingDirectory(prompt, 'NapCat 根目录', defaultRoot)
 }
 
-async function configureDshProfile(answers: SetupAnswers, logPath: string): Promise<void> {
+async function configureDshProfile(answers: SetupAnswers, logPath: string, token: string): Promise<void> {
   const profilePath = join(resolveDshHome(), 'profiles', 'web', 'cordis.patch.yml')
   const pluginName = fileURLToPath(new URL('../index.js', import.meta.url))
   const item = buildBridgeInsertItem({
     pluginName,
     wsUrl: 'ws://127.0.0.1:3001',
+    token,
     adminQq: answers.qq,
     commandPrefix: answers.commandPrefix,
     provider: 'deepseek-official',
@@ -154,19 +171,30 @@ async function configureDshProfile(answers: SetupAnswers, logPath: string): Prom
     selfLogPath: answers.selfLogEnabled ? logPath : undefined,
   })
   const previous = await readFile(profilePath, 'utf8').catch(() => '[]\n')
-  const update = updateProfilePatch(previous, item)
+  const update = updateSetupProfilePatch(previous, item)
 
-  console.log(`\n第一步: 配置 DSH profile: ${profilePath}`)
+  console.log(`\n最后一步: 写入 DSH profile: ${profilePath}`)
   console.log(update.preview)
   const backup = await writeProfilePatchWithBackup(profilePath, update.content)
   console.log(`已写入 profile。备份: ${backup}`)
   console.log(`如需调整模型、前缀或 QQ 白名单，可修改: ${profilePath}`)
 }
 
+async function configureDshSettings(): Promise<void> {
+  const settingsPath = join(resolveDshHome(), 'settings.yaml')
+  const previous = await readFile(settingsPath, 'utf8').catch(() => '')
+  const update = updatePermissionDefaultPreset(previous)
+
+  console.log(`\n写入 DSH 默认权限设置: ${settingsPath}`)
+  console.log(update.preview)
+  const backup = await writeSettingsWithBackup(settingsPath, update.content)
+  console.log(`已写入 settings。备份: ${backup}`)
+}
+
 async function configureNapcatEnvironment(prompt: Prompter, qq: number, napcatRoot: string): Promise<string | null> {
   const onebotPath = defaultOnebotConfigPath(qq, napcatRoot)
 
-  console.log('\n第二步: 配置 NapCat 环境')
+  console.log('\n第一步: 配置 NapCat 环境')
   let status = inspectNapcat(qq, napcatRoot)
   printNapcatStatus(status)
 
@@ -201,7 +229,7 @@ async function prepareOnebot(prompt: Prompter, configPath: string): Promise<stri
     console.log('  正向 WebSocket / Forward WebSocket')
     console.log('  监听地址: 127.0.0.1')
     console.log('  端口: 3001')
-    console.log('  access token: 设置一个随机 token，并稍后导出为 DSH_QQ_TOKEN')
+    console.log('  access token: 设置一个随机 token；setup 会把它写入 DSH profile')
     if (await prompt.confirm('已经在 WebUI 中手动配置完成了吗', false)) {
       const token = await tryReadOnebotToken(configPath)
       if (token) return token
@@ -316,6 +344,10 @@ function restartNapcatForQr(qq: number): void {
   spawnSync('napcat', ['start', String(qq)], { stdio: 'inherit' })
 }
 
+function printSetupRefreshGuidance(): void {
+  console.log(yellow('如果重新 setup、重新配置 OneBot token、或重装/重配 NapCat，请重新运行 setup 更新配置。'))
+}
+
 function commandExists(cmd: string): boolean {
   return spawnSync('sh', ['-lc', `command -v ${shellQuote(cmd)}`], { stdio: 'ignore' }).status === 0
 }
@@ -349,4 +381,8 @@ function shellQuote(input: string): string {
 
 function green(text: string): string {
   return `\x1b[32m${text}\x1b[0m`
+}
+
+function yellow(text: string): string {
+  return `\x1b[33m${text}\x1b[0m`
 }

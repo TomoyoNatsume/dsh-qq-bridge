@@ -38,7 +38,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const consumed = await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello world' }))
     expect(consumed).toBe(true)
     expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello world')
-    expect(sent).toEqual(['echo:hello world'])
+    expect(sent).toEqual(['收到，正在处理...', 'echo:hello world'])
   })
 
   it('回发失败只记录警告,不让 route 抛错拖垮 host', async () => {
@@ -76,7 +76,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     router.register(new AgentRpcHandler({ run } as never))
     await router.route(makeEvent({ message_type: 'group', group_id: 555, user_id: 10001, raw_message: '/dsh task' }))
     expect(run).toHaveBeenCalledWith('group:555', 'task')
-    expect(sent).toEqual(['group#555#r:task'])
+    expect(sent).toEqual(['group#555#收到，正在处理...', 'group#555#r:task'])
   })
 
   it('多个 handler 可按命令名路由(shell vs agent)', async () => {
@@ -118,7 +118,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     routerDefault.register(new AgentRpcHandler(execDefault as never))
     await routerDefault.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
     expect(execDefault.run).toHaveBeenCalledWith('private:10001', 'q')
-    expect(sent).toEqual(['最终完整结果'])
+    expect(sent).toEqual(['收到，正在处理...', '最终完整结果'])
   })
 
   it('streamText=true 时分段回发,且 streamReasoning 控制思考过程', async () => {
@@ -135,7 +135,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const routerDefault = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
     routerDefault.register(new AgentRpcHandler(execDefault as never, { streamText: true }))
     await routerDefault.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
-    expect(sent).toEqual(['这是结果', '最终完整结果'])
+    expect(sent).toEqual(['收到，正在处理...', '这是结果', '最终完整结果'])
 
     // streamReasoning=true:reasoning 分段也回发
     const sent2: string[] = []
@@ -149,7 +149,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const routerOpen = new MessageRouter(gate, async (_, __, text) => void sent2.push(text))
     routerOpen.register(new AgentRpcHandler(execOpen as never, { streamText: true, streamReasoning: true }))
     await routerOpen.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
-    expect(sent2).toEqual(['开始思考', '这是结果', '最终完整结果'])
+    expect(sent2).toEqual(['收到，正在处理...', '开始思考', '这是结果', '最终完整结果'])
   })
 
   it('流式 text 已等于最终结果时不重复回发最终完整版', async () => {
@@ -165,7 +165,7 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
     router.register(new AgentRpcHandler(exec as never, { streamText: true }))
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
-    expect(sent).toEqual(['最终', '结果'])
+    expect(sent).toEqual(['收到，正在处理...', '最终', '结果'])
   })
 
   it('splitText:超长文本按 maxLen 拆分,且每条不超过限制', () => {
@@ -191,8 +191,24 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const exec = { run: vi.fn(async () => longResult) }
     router.register(new AgentRpcHandler(exec as never, { maxMessageLength: 2000 }))
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
-    expect(sent.length).toBeGreaterThanOrEqual(3)
+    expect(sent[0]).toBe('收到，正在处理...')
+    expect(sent.length).toBeGreaterThanOrEqual(4)
     for (const s of sent) expect(s.length).toBeLessThanOrEqual(2000)
-    expect(sent.join('')).toBe(longResult)
+    expect(sent.slice(1).join('')).toBe(longResult)
+  })
+
+  it('agent 超时后回发无响应消息,不等待永久 pending 的 executor', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    let resolveLate: ((value: string) => void) | undefined
+    const exec = { run: vi.fn(() => new Promise<string>((resolve) => { resolveLate = resolve })) }
+    router.register(new AgentRpcHandler(exec as never, { timeoutMs: 5 }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    resolveLate?.('late result')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sent).toEqual(['收到，正在处理...', 'agent 无响应，请稍后重试。'])
   })
 })

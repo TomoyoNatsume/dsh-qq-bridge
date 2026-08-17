@@ -62,6 +62,12 @@ export class AgentRpcHandler implements Handler {
       streamText?: boolean
       /** 单条 QQ 消息最大长度;超长自动拆分为多条发送。 */
       maxMessageLength?: number
+      /** 收到有效指令后立即回发的确认消息;设为空字符串可关闭。 */
+      ackMessage?: string
+      /** Agent 超时时间(ms);默认 120s。 */
+      timeoutMs?: number
+      /** Agent 长时间无响应时回发的消息。 */
+      timeoutMessage?: string
     } = {},
   ) {}
 
@@ -80,10 +86,16 @@ export class AgentRpcHandler implements Handler {
 
   async run(ctx: HandlerContext): Promise<void> {
     const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
+    const ackMessage = this.opts.ackMessage ?? '收到，正在处理...'
+    const timeoutMs = this.opts.timeoutMs ?? 120_000
+    const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。'
+    let active = true
     try {
+      if (ackMessage) await this.respondChunk(ctx, ackMessage)
       if (!this.opts.streamText) {
         // AgentExecutor.run resolve 即本轮完成标志:DSH executor 在内部等待 agent.whenIdle()。
-        const result = await this.executor.run(sessionKey, ctx.payload)
+        const result = await withTimeout(this.executor.run(sessionKey, ctx.payload), timeoutMs)
+        active = false
         await this.respondChunk(ctx, result || '(no output)')
         return
       }
@@ -92,18 +104,42 @@ export class AgentRpcHandler implements Handler {
       // 分段返回:agent 边产出边回发,用户不必等整轮结束。
       // 默认只回发「思考结果」(kind='text');思考过程(reasoning)默认忽略,
       // 避免逐 token 的思考增量在聊天框刷屏。可用 streamReasoning 开启。
-      const result = await this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
+      const result = await withTimeout(this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
+        if (!active) return
         if (kind === 'reasoning' && !this.opts.streamReasoning) return
         if (kind === 'text') streamedText.push(chunk)
         void this.respondChunk(ctx, chunk)
-      })
+      }), timeoutMs)
+      active = false
       const final = result || '(no output)'
       // 若流式 text 分段已经覆盖最终结果,不再重复发送最终完整版。
       if (streamedText.join('').trim() === final.trim()) return
       // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
       await this.respondChunk(ctx, final)
     } catch (err) {
-      await this.respondChunk(ctx, `agent error: ${err instanceof Error ? err.message : String(err)}`)
+      active = false
+      const message = err instanceof AgentTimeoutError
+        ? timeoutMessage
+        : `agent error: ${err instanceof Error ? err.message : String(err)}`
+      await this.respondChunk(ctx, message)
     }
   }
+}
+
+export class AgentTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`agent timed out after ${timeoutMs}ms`)
+    this.name = 'AgentTimeoutError'
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new AgentTimeoutError(timeoutMs)), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }

@@ -29,6 +29,12 @@ const DshQqBridgeConfig = z.object({
       streamReasoning: z.boolean().default(false),
       /** 单条 QQ 消息最大长度(字符数);超长自动拆分为多条发送。QQ 官方单条约 5000 字,默认留余量。 */
       maxMessageLength: z.number().int().positive().default(4500),
+      /** 收到有效 QQ 指令后立即回发的确认消息;设为空字符串可关闭。 */
+      ackMessage: z.string().default('收到，正在处理...'),
+      /** Agent 本轮最长等待时间(ms),超时后回复 timeoutMessage。 */
+      timeoutMs: z.number().int().positive().default(120_000),
+      /** Agent 长时间无响应时回发的消息。 */
+      timeoutMessage: z.string().default('agent 无响应，请稍后重试。'),
     })
     .default({}),
   shell: z
