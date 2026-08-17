@@ -1,5 +1,7 @@
 # dsh-qq-bridge
 
+> 当前自动安装向导只适配 Linux / WSL2 环境；原生 Windows 暂未适配。Windows 用户建议先使用 WSL2。
+
 ## 效果展示
 
 <img src="docs/asset/test1.png" alt="QQ 验证成功截图" width="360">
@@ -81,7 +83,7 @@ DSH web 已后台启动。PID: 12345
 日志: /tmp/dsh-qq-bridge-dsh-web.log
 ```
 
-![DSH 启动成功截图](docs/asset/test0.png)
+<img src="docs/asset/test0.png" alt="DSH 启动成功截图">
 
 ## 3. 用 QQ 验证
 
