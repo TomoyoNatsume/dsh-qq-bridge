@@ -10,7 +10,9 @@
 QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 ```
 
-推荐先用**一个 QQ 号**登录 NapCat，然后从手机 QQ 给“我的电脑”或自己发送 `/dsh ...`。这样不需要准备机器人小号和主号两个账号。
+推荐先用**一个 QQ 号**登录 NapCat，然后从手机 QQ 给自己发送 `/dsh ...`。这样不需要准备机器人小号和主号两个账号。
+
+当前不支持通过 QQ 的“我的电脑”会话交互；“我的电脑”里的消息可以被日志捕获，但回复会回到当前 QQ 自身，交互链路不完整。
 
 项目背景和架构说明见 [`docs/project-overview.md`](docs/project-overview.md)。
 
@@ -21,20 +23,11 @@ QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 - 已安装好的 DSH / DeepSeek Harness，且知道它的项目目录。
 - DeepSeek API Key 已按 DSH 自身方式配置好。
 
-> 您可以将本项目（本文件）交给agent，让Ta帮您完成大部分配置工作。您只需完成扫码登陆QQ、配置Napcat WebUI等工作，根据您的agent引导即可。
+> 您可以将本项目（本文件）交给 agent，让 Ta 帮您完成大部分配置工作。您只需按终端向导输入 QQ 号、选择模型、扫码登录 NapCat。
 
-## 1. clone 并构建插件
+## 1. 安装 NapCat CLI
 
-```bash
-git clone https://github.com/TomoyoNatsume/dsh-qq-bridge.git
-cd dsh-qq-bridge
-npm install
-npm run build
-```
-
-## 2. 安装并登录 NapCat
-
-Linux / WSL2 推荐:
+`setup` 需要系统里已有 `napcat` 命令。如果尚未安装，Linux / WSL2 推荐:
 
 ```bash
 cd ~
@@ -42,142 +35,66 @@ curl -o napcat.sh https://raw.githubusercontent.com/NapNeko/NapCat-Installer/mai
 bash napcat.sh --docker n --cli y
 ```
 
-启动并查看登录日志:
+安装完成后确认命令可用:
 
 ```bash
-napcat start <你的QQ号>
-napcat log <你的QQ号>
+napcat help
 ```
-
-**用手机 QQ 扫日志里的二维码完成登录。**
 
 >注意:不要运行 `nc`。在 Debian / Ubuntu 上，`nc` 通常是 OpenBSD netcat，不是 NapCat。
 
-## 3. 进入 NapCat WebUI
-
-WebUI 默认地址通常是:
-
-```text
-http://localhost:6099
-```
->注意wsl用户不要用127.0.0.1，而要用localhost
-
-如果打不开，以 NapCat 日志里打印的地址为准：
+## 2. 构建并运行向导
 
 ```bash
-napcat log <你的QQ号>
-
-# 或者直接查看log文件：
-cat ~/Napcat/log/napcat_<你的QQ号>.log
+git clone https://github.com/TomoyoNatsume/dsh-qq-bridge.git
+cd dsh-qq-bridge
+npm install
+npm run build
+node dist/main.js setup
 ```
 
-日志里一般会出现类似:
+`npm run build` 成功后也会提示下一步执行 `node dist/main.js setup`。如果已经 `npm link` 或全局安装，也可以直接运行: `dsh-qq-bridge setup`
+
+<img src="docs/asset/test2.png" alt="setup 交互式向导截图" width="720">
+
+向导会完成这些事:
+
+- 校验 QQ 号格式、DSH / DeepSeek Harness 目录、NapCat 根目录。
+- 用上下键选择模型、是否启用单号模式、是否后台启动 DSH web。
+- 生成并写入 `~/.dsh/profiles/web/cordis.patch.yml`，只增改 `insert` 下的 `id: dsh-qq-bridge`，并保留写入前备份。
+- 检查 `napcat status <QQ>`；未启动时自动执行 `napcat start <QQ>`。
+- 打印 NapCat 日志路径和 `napcat log <QQ>`，让你自己打开日志扫码登录。
+- 自动配置 NapCat OneBot 正向 WebSocket: `127.0.0.1:3001`。
+- 可选后台启动 `pnpm dsh web`；如果 `http://127.0.0.1:3080` 已经可访问，会跳过启动，避免重复起服务。
+
+在普通终端中，选项题支持上下键选择、回车确认；如果运行环境不支持交互式 TTY，会自动退回到输入序号/文本的模式。输入不合法时会重复当前问题，不会直接退出。
+
+扫码登录时请打开向导打印的日志。日志里可能有多个二维码，请拉到最后一个二维码扫码；如果二维码过期，在向导里选择“二维码过期”，它会重启 NapCat 生成新的登录请求。
+
+向导写入配置后会提示可修改的文件: `~/.dsh/profiles/web/cordis.patch.yml`
+
+如果最后选择后台启动 DSH web，看到类似下面输出即表示服务已启动:
 
 ```text
-http://localhost:6099/webui?token=...
-```
-
-这里的 token 是 **WebUI 登录 token**，只用于打开 WebUI，不是后面插件用的 OneBot token。
-
-## 4. 开启 OneBot 正向 WebSocket
-
-在 NapCat WebUI 里开启:
-
-```text
-正向 WebSocket / Forward WebSocket
-监听地址: 127.0.0.1
-端口: 3001
-access token: 使用默认分配的值; 或者自己设置一个，后面 DSH_QQ_TOKEN 要填同一个
-```
-
-保存后保持 NapCat 运行。
-
-## 5. 配置 DSH web profile
-
-把插件写入 DSH 的 `web` profile。默认配置文件是:
-
-```text
-~/.dsh/profiles/web/cordis.patch.yml
-```
-
-如果这个文件目前只有 `[]`，可以替换成下面内容；如果已经有别的配置，就把 `insert` 这一段合并进去(注意替换其中的qq号和log路径):
-
-```yaml
-- insert:
-    - id: dsh-qq-bridge
-      name: /path/to/dsh-qq-bridge/dist/index.js
-      config:
-        napcat:
-          wsUrl: ws://127.0.0.1:3001
-          token: !!js process.env.DSH_QQ_TOKEN
-        access:
-          adminQq: <你的QQ号>
-          allowlist: []
-          commandPrefix: /dsh
-          mode: whitelist
-        agent:
-          provider: deepseek-official
-          model: deepseek-v4-pro
-          preset: standard
-          streamReasoning: false
-          maxMessageLength: 4500
-        shell:
-          enabled: false
-        selfLogInput:
-          enabled: true
-          logPath: /home/<你的Linux用户名>/Napcat/log/napcat_<你的QQ号>.log
-          pollIntervalMs: 1000
-          replayOnStart: false
-```
-
-需要改的地方:
-
-- `name`:改成你 clone 后的真实插件入口路径，例如 `/home/me/dsh-qq-bridge/dist/index.js`。
-- `adminQq`:填你的 QQ 号。
-- `logPath`:填你的 NapCat 日志路径。
-- `model`:按你的 DSH 模型配置调整。
-
-如果你不用“我的电脑/自己给自己发消息”，而是主号发给机器人小号，可以删除 `selfLogInput` 这一段，并把 `adminQq` 填主号 QQ。
-
-## 6. 启动 DSH
-
-**需要重启DSH服务。**切到 DSH / DeepSeek Harness 项目目录执行:
-
-```bash
-cd <你的 deepseek-harness 目录>
-
-export DSH_QQ_TOKEN='<NapCat OneBot access token>'
-export DSH_PERMISSION_MODE=danger-full-access
-
-pnpm dsh web
-```
-
-`DSH_QQ_TOKEN` 填 WebUI 里正向 WebSocket 的 access token，不是 WebUI 登录链接里的 token。
-
-`DSH_PERMISSION_MODE=danger-full-access` 会让 DSH Agent 直接执行本机工具调用，不再卡在审批流程。只建议在私用、白名单只放自己的情况下使用。
-
-看到下面几行就表示启动成功:
-
-```text
-[dsh-qq-bridge] onebot ws connected: ws://127.0.0.1:3001
-dsh web: http://127.0.0.1:3080
-[dsh-qq-bridge] mounting agent preset "standard"
+DSH web 已后台启动。PID: 12345
+地址: http://127.0.0.1:3080
+日志: /tmp/dsh-qq-bridge-dsh-web.log
 ```
 
 ![DSH 启动成功截图](docs/asset/test0.png)
 
-DSH WebUI 默认地址是:
+## 3. 用 QQ 验证
 
-```text
-http://127.0.0.1:3080
-```
-
-## 7. 用 QQ 验证
-
-从手机 QQ 给“我的电脑”或自己发送:
+从手机 QQ 给自己发送:
 
 ```text
 /dsh ping
+```
+
+如果发送 `/dsh ping` 后没有响应，请先查看 NapCat 日志，确认 QQ 是否仍然登录成功:
+
+```bash
+napcat log <你的QQ号>
 ```
 
 能收到回复后，再试:
@@ -187,7 +104,7 @@ http://127.0.0.1:3080
 /dsh 列出当前工作目录下的目录和文件
 ```
 
-## 8. 更改配置
+## 4. 更改配置
 
 正式接入 DSH 时，主要改这个文件:
 
@@ -256,7 +173,7 @@ access:
 
 ### 更改单号模式日志路径
 
-如果你用“我的电脑/自己给自己发消息”，保持:
+如果你用“自己给自己发消息”的单号模式，保持:
 
 ```yaml
 selfLogInput:
@@ -275,19 +192,113 @@ selfLogInput:
 
 ### 本地回显测试入口的配置
 
-只有运行 `bash scripts/start-local-echo.sh` 或 `npm start` 这种不接 DSH Agent 的本地测试入口时，才用环境变量改配置:
+只有运行 `dsh-qq-bridge echo`、`bash scripts/start-local-echo.sh` 或 `npm start` 这种不接 DSH Agent 的本地测试入口时，才用环境变量改配置:
 
 ```bash
 DSH_QQ_WS_URL=ws://127.0.0.1:3001 \
 DSH_QQ_ADMIN=<你的QQ号> \
 DSH_QQ_PREFIX=/dsh \
 DSH_QQ_SELF_LOG=true \
-npm start
+dsh-qq-bridge echo
 ```
 
 正式使用 `pnpm dsh web` 时，以 `cordis.patch.yml` 为准。
 
-## 9. 停止 DSH
+## 5. 安全防护
+
+这个项目的目标是“私用 QQ 遥控自己的 DSH”，默认按本机私有服务来设计。建议保持下面这些防护措施。
+
+### 只允许指定 QQ 触发
+
+插件入口有一层 `AccessGate`，默认使用白名单模式:
+
+```yaml
+access:
+  adminQq: <你的QQ号>
+  allowlist: []
+  commandPrefix: /dsh
+  mode: whitelist
+```
+
+- `adminQq`:拥有者 QQ，总是放行。
+- `allowlist`:额外允许的 QQ 列表，默认空数组。
+- `mode: whitelist`:只允许 `adminQq` 和 `allowlist` 里的 QQ 触发。
+
+不要在正式使用中把 `mode` 改成 `open`。`open` 表示任何能给这个 QQ 发消息的人都可能触发 DSH，只适合临时调试。
+
+### 必须带指令前缀
+
+只有以 `commandPrefix` 开头的消息才会进入 DSH:
+
+```yaml
+commandPrefix: /dsh
+```
+
+普通聊天、群消息、无关消息不会被处理。改成 `/ai`、`/bot` 等其它前缀也可以，但发送时必须同步改成新的前缀。
+
+### OneBot 端口只监听本机
+
+NapCat 的正向 WebSocket 推荐这样配置:
+
+```text
+监听地址: 127.0.0.1
+端口: 3001
+access token: <随机 token>
+```
+
+`127.0.0.1` 表示只允许本机连接，不对局域网或公网开放。插件侧也连接本机地址:
+
+```yaml
+napcat:
+  wsUrl: ws://127.0.0.1:3001
+  token: !!js process.env.DSH_QQ_TOKEN
+```
+
+不要把 NapCat OneBot WS 监听地址改成 `0.0.0.0` 或公网 IP，除非你已经准备好防火墙、内网/VPN 隔离和强 token。
+
+### OneBot access token 不写进仓库
+
+`DSH_QQ_TOKEN` 是 NapCat 正向 WebSocket 的 access token，不是 WebUI 登录链接里的 token。README 示例用环境变量注入:
+
+```bash
+export DSH_QQ_TOKEN='<NapCat OneBot access token>'
+```
+
+这样 token 不会写进 `cordis.patch.yml`、Git 历史或 release 包。不要把 QQ 凭据、NapCat WebUI token、OneBot access token、DeepSeek API Key 提交到仓库。
+
+### shell handler 默认关闭
+
+配置示例里保持:
+
+```yaml
+shell:
+  enabled: false
+```
+
+也就是说 QQ 消息默认不会直接执行 shell 命令。即使你之后扩展 shell 能力，也应继续保持 `whitelist`、强指令前缀和 DSH 自身的权限控制。
+
+### 单号模式不回放历史日志
+
+单号模式下 `selfLogInput` 会读取 NapCat 日志，把“自己给自己”的 `/dsh ...` 转成内部消息。默认配置是:
+
+```yaml
+selfLogInput:
+  replayOnStart: false
+```
+
+这能避免 DSH 重启时把历史 `/dsh` 消息重新执行一遍。除非你明确要调试历史日志，否则不要改成 `true`。
+
+### DSH 工具权限需要谨慎
+
+文档里使用:
+
+```bash
+export DSH_PERMISSION_MODE=danger-full-access
+```
+
+这是为了私用场景下让 DSH Agent 不再卡在工具审批。它本身权限很高，所以必须和 `whitelist`、`adminQq`、本机端口监听、OneBot token 一起使用；不要在开放 QQ 入口或公网端口时启用。
+
+## 6. 停止 DSH
 
 如果是前台运行的 `pnpm dsh web`，在终端按:
 
@@ -309,7 +320,7 @@ kill <PID>
 
 这里要 kill 的是 `ps` 查到的实际进程 PID，不一定是 shell 打印的 job id。
 
-## 10. 开源许可与致谢
+## 7. 开源许可与致谢
 
 本项目使用 MIT License 发布，见 [`LICENSE`](LICENSE)。
 
@@ -327,7 +338,7 @@ kill <PID>
 
 简单说:需要 mention。对 `ws`、`zod` 这类依赖，保留 package metadata 和 third-party notices 即可；对 NapCatQQ 这类没有打包进本仓库但对项目很关键的外部运行时，README 里做清晰致谢和边界说明最稳。
 
-## 11. 常见问题
+## 8. 常见问题
 
 ### QQ 消息没回复
 
@@ -354,7 +365,7 @@ napcat log <你的QQ号>
 export DSH_PERMISSION_MODE=danger-full-access
 ```
 
-重新 kill 旧进程，再按第 6 步启动。
+重新 kill 旧进程，再按向导启动，或手动执行 `pnpm dsh web`。
 
 ### 临时调试时想用一次性 patch 启动
 

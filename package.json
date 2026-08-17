@@ -11,11 +11,13 @@
   },
   "files": [
     "dist",
+    "scripts/postbuild.js",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/main.js",
+    "postbuild": "node scripts/postbuild.js",
+    "start": "node dist/main.js echo",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -29,13 +31,14 @@
     "agent"
   ],
   "dependencies": {
-    "zod": "^3.23.0",
-    "ws": "^8.17.0"
+    "@inquirer/prompts": "^8.5.2",
+    "ws": "^8.17.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0",
     "@types/ws": "^8.5.10",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
   }
 }

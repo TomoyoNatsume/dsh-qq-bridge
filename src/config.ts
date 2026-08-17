@@ -38,7 +38,7 @@ const DshQqBridgeConfig = z.object({
     .default({}),
   selfLogInput: z
     .object({
-      /** 实验性:tail NapCat 日志中的 self-sent 消息,用于单号/我的电脑场景。 */
+      /** 实验性:tail NapCat 日志中的 self-sent 消息,用于自己给自己发消息的单号场景。 */
       enabled: z.boolean().default(false),
       /** NapCat 日志路径;缺省按 ~/Napcat/log/napcat_<adminQq>.log 推导。 */
       logPath: z.string().optional(),
