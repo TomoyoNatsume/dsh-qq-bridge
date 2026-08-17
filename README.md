@@ -2,7 +2,7 @@
 
 ## 效果展示
 
-![QQ 验证成功截图](docs/asset/test1.png)
+<img src="docs/asset/test1.png" alt="QQ 验证成功截图" width="360">
 
 从 clone 到 QQ 遥控 DSH 的最短流程。目标是:
 
@@ -187,7 +187,107 @@ http://127.0.0.1:3080
 /dsh 列出当前工作目录下的目录和文件
 ```
 
-## 8. 停止 DSH
+## 8. 更改配置
+
+正式接入 DSH 时，主要改这个文件:
+
+```text
+~/.dsh/profiles/web/cordis.patch.yml
+```
+
+改完配置后需要**重启 DSH** 才会生效；只有改了本项目 `src/` 源码时，才需要重新执行 `npm run build`。
+
+### 更改调用的 DSH 模型
+
+修改 `agent.provider` 和 `agent.model`:
+
+```yaml
+agent:
+  provider: deepseek-official
+  model: deepseek-v4-pro
+  preset: standard
+```
+
+- `provider`:DSH 里已配置好的模型提供方。
+- `model`:该 provider 下的模型 id。
+- `preset`:DSH agent preset，通常保持 `standard` 即可。
+
+### 更改 QQ 指令前缀
+
+修改 `access.commandPrefix`:
+
+```yaml
+access:
+  adminQq: <你的QQ号>
+  allowlist: []
+  commandPrefix: /dsh
+  mode: whitelist
+```
+
+例如改成 `/ai` 后，QQ 里就要发送:
+
+```text
+/ai ping
+```
+
+如果开启了单号模式的 `selfLogInput`，它会复用同一个 `commandPrefix`，不需要额外改一处。
+
+### 更改允许使用机器人的 QQ
+
+只允许自己使用时:
+
+```yaml
+access:
+  adminQq: <你的QQ号>
+  allowlist: []
+  mode: whitelist
+```
+
+要额外允许其他 QQ 使用，把 QQ 号加到 `allowlist`:
+
+```yaml
+access:
+  adminQq: <你的QQ号>
+  allowlist: [10001, 10002]
+  mode: whitelist
+```
+
+不建议把 `mode` 改成 `open`，除非你明确知道风险。
+
+### 更改单号模式日志路径
+
+如果你用“我的电脑/自己给自己发消息”，保持:
+
+```yaml
+selfLogInput:
+  enabled: true
+  logPath: /home/<你的Linux用户名>/Napcat/log/napcat_<你的QQ号>.log
+  pollIntervalMs: 1000
+  replayOnStart: false
+```
+
+如果你是“主号发给机器人小号”，通常可以删除 `selfLogInput`，或改成:
+
+```yaml
+selfLogInput:
+  enabled: false
+```
+
+### 本地回显测试入口的配置
+
+只有运行 `bash scripts/start-local-echo.sh` 或 `npm start` 这种不接 DSH Agent 的本地测试入口时，才用环境变量改配置:
+
+```bash
+DSH_QQ_WS_URL=ws://127.0.0.1:3001 \
+DSH_QQ_ADMIN=<你的QQ号> \
+DSH_QQ_PREFIX=/dsh \
+DSH_QQ_SELF_LOG=true \
+npm start
+```
+
+正式使用 `pnpm dsh web` 时，以 `cordis.patch.yml` 为准。
+
+## 9. 停止 DSH
 
 如果是前台运行的 `pnpm dsh web`，在终端按:
 
@@ -209,7 +309,25 @@ kill <PID>
 
 这里要 kill 的是 `ps` 查到的实际进程 PID，不一定是 shell 打印的 job id。
 
-## 9. 常见问题
+## 10. 开源许可与致谢
+
+本项目使用 MIT License 发布，见 [`LICENSE`](LICENSE)。
+
+发布 release 时建议保留以下文件:
+
+- [`LICENSE`](LICENSE):本项目许可证。
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md):第三方依赖、协议与外部项目说明。
+
+本项目会连接或参考以下项目/协议:
+
+- [NapCatQQ](https://github.com/NapNeko/NapCatQQ):提供 QQ / OneBot 运行端点。本项目不打包、不修改、不再分发 NapCatQQ，只要求用户自行安装并运行。NapCatQQ 使用自定义的 Limited Redistribution License，若未来 release 中包含 NapCatQQ 文件，必须额外遵守其上游许可证与非商业/再分发限制。
+- [OneBot](https://github.com/botuniverse/onebot):聊天机器人接口标准，本项目通过 OneBot WebSocket 协议与 NapCat 通信。
+- [DeepSeek Harness / DSH](https://github.com/deepseek-ai/deepseek-harness):本插件运行所在的 Host / Agent 环境。
+- `ws`、`zod` 等 npm 依赖:详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+简单说:需要 mention。对 `ws`、`zod` 这类依赖，保留 package metadata 和 third-party notices 即可；对 NapCatQQ 这类没有打包进本仓库但对项目很关键的外部运行时，README 里做清晰致谢和边界说明最稳。
+
+## 11. 常见问题
 
 ### QQ 消息没回复
 
