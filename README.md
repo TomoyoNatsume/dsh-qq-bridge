@@ -47,7 +47,6 @@ napcat help
 
 ## 2. 安装并运行向导
 
-### 方式 A:通过 DSH 插件管理安装
 
 ```bash
 pnpm dsh plugin --profile web add github:TomoyoNatsume/dsh-qq-bridge
@@ -55,21 +54,6 @@ cd ~/.dsh/profiles/web
 pnpm exec dsh-qq-bridge setup
 ```
 
-`dsh plugin ... add` 只会把本项目安装到 DSH web profile 的依赖里。它不会自动挂载插件，也不会改 `cordis.patch.yml`，因此安装后不影响正常 `pnpm dsh web` 启动。真正的 QQ / NapCat / DSH profile 配置由 `dsh-qq-bridge setup` 完成。
-
-GitHub 安装使用仓库里已提交的 `dist/` 构建产物，不会在用户机器上执行 `prepare` / `postinstall` 等安装脚本，因此不需要为 pnpm 10 手动配置 `onlyBuiltDependencies`。
-
-### 方式 B:本地 clone 构建
-
-```bash
-git clone https://github.com/TomoyoNatsume/dsh-qq-bridge.git
-cd dsh-qq-bridge
-npm install
-npm run build
-node dist/main.js setup
-```
-
-本地 clone 用于开发或手动调试。改过 `src/` 源码后需要重新执行 `npm run build`，然后运行 `node dist/main.js setup`。如果已经 `npm link` 或全局安装，也可以直接运行: `dsh-qq-bridge setup`
 
 <img src="docs/asset/test2.png" alt="setup 交互式向导截图" width="720">
 
@@ -86,12 +70,9 @@ node dist/main.js setup
 - 如果 setup 时检测到 DSH web 已经在运行，会提示先重启 DSH web；首次 setup 或更改配置后，旧进程不一定已加载新的 QQ bridge 配置。
 - 完成时提示重新 setup 的触发条件。OneBot token 会写入本机的 `cordis.patch.yml`，DSH 默认权限会写入本机的 `settings.yaml`，重启 DSH web 时不需要再导出 `DSH_QQ_TOKEN` 或 `DSH_PERMISSION_MODE`。
 
-在普通终端中，选项题支持上下键选择、回车确认；如果运行环境不支持交互式 TTY，会自动退回到输入序号/文本的模式。输入不合法时会重复当前问题，不会直接退出。
+> 扫码登录时请打开向导打印的日志。日志里可能有多个二维码，请拉到最后一个二维码扫码；如果二维码过期，在向导里选择“二维码过期”，它会重启 NapCat 生成新的登录请求。
 
-扫码登录时请打开向导打印的日志。日志里可能有多个二维码，请拉到最后一个二维码扫码；如果二维码过期，在向导里选择“二维码过期”，它会重启 NapCat 生成新的登录请求。
-
-向导写入配置后会提示可修改的文件: `~/.dsh/profiles/web/cordis.patch.yml`
-
+### 启动/重启 DSH 服务
 如果最后选择后台启动 DSH web，看到类似下面输出即表示服务已启动:
 
 ```text
@@ -102,6 +83,8 @@ DSH web 后台启动成功。
 启动命令: node --import tsx/esm apps/cli/src/bin.ts web
 管理命令: dsh-qq-bridge web status | dsh-qq-bridge web logs | dsh-qq-bridge web stop
 ```
+
+如果选择自己手动启动 DSH web，则看到下面输出即表示服务已启动：
 
 <img src="docs/asset/test0.png" alt="DSH 启动成功截图">
 
