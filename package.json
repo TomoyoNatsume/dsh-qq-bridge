@@ -9,17 +9,17 @@
   "bin": {
     "dsh-qq-bridge": "dist/main.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "files": [
     "dist",
     "scripts/postbuild.js",
-    "scripts/postinstall.js",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "postbuild": "node scripts/postbuild.js",
-    "prepare": "npm run build",
-    "postinstall": "node scripts/postinstall.js",
     "start": "node dist/main.js echo",
     "test": "vitest run",
     "test:watch": "vitest"

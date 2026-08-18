@@ -45,7 +45,7 @@ napcat help
 
 >注意:不要运行 `nc`。在 Debian / Ubuntu 上，`nc` 通常是 OpenBSD netcat，不是 NapCat。
 
-## 2. 构建并运行向导
+## 2. 安装并运行向导
 
 ### 方式 A:通过 DSH 插件管理安装
 
@@ -57,7 +57,7 @@ pnpm exec dsh-qq-bridge setup
 
 `dsh plugin ... add` 只会把本项目安装到 DSH web profile 的依赖里。它不会自动挂载插件，也不会改 `cordis.patch.yml`，因此安装后不影响正常 `pnpm dsh web` 启动。真正的 QQ / NapCat / DSH profile 配置由 `dsh-qq-bridge setup` 完成。
 
-安装完成时也会打印 setup 提示。如果使用 pnpm 10 安装 GitHub 源码包时提示需要允许 build script，请按 DSH / pnpm 打印的 `allowBuilds` 提示处理后重新执行 add；这是为了让 GitHub 源码安装时生成 `dist/` 和 `dsh-qq-bridge` 命令。
+GitHub 安装使用仓库里已提交的 `dist/` 构建产物，不会在用户机器上执行 `prepare` / `postinstall` 等安装脚本，因此不需要为 pnpm 10 手动配置 `onlyBuiltDependencies`。
 
 ### 方式 B:本地 clone 构建
 
@@ -69,7 +69,7 @@ npm run build
 node dist/main.js setup
 ```
 
-`npm run build` 成功后也会提示下一步执行 `node dist/main.js setup`。如果已经 `npm link` 或全局安装，也可以直接运行: `dsh-qq-bridge setup`
+本地 clone 用于开发或手动调试。改过 `src/` 源码后需要重新执行 `npm run build`，然后运行 `node dist/main.js setup`。如果已经 `npm link` 或全局安装，也可以直接运行: `dsh-qq-bridge setup`
 
 <img src="docs/asset/test2.png" alt="setup 交互式向导截图" width="720">
 

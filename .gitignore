@@ -3,9 +3,6 @@ node_modules/
 .npm-cache/
 .npm-tmp/
 
-# build
-dist/
-
 # logs / test
 *.log
 coverage/
