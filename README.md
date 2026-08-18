@@ -29,7 +29,7 @@ QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 ## 1. 安装 NapCat CLI
 
-`setup` 需要系统里已有 `napcat` 命令。如果尚未安装，Linux / WSL2 推荐:
+当前工具需要系统里已有 `napcat` 命令。如果尚未安装，Linux / WSL2 推荐:
 
 ```bash
 cd ~
@@ -43,10 +43,8 @@ bash napcat.sh --docker n --cli y
 napcat help
 ```
 
->注意:不要运行 `nc`。在 Debian / Ubuntu 上，`nc` 通常是 OpenBSD netcat，不是 NapCat。
-
 ## 2. 安装并运行向导
-
+安装本插件：
 
 ```bash
 pnpm dsh plugin --profile web add github:TomoyoNatsume/dsh-qq-bridge
@@ -54,6 +52,7 @@ cd ~/.dsh/profiles/web
 pnpm exec dsh-qq-bridge setup
 ```
 
+之后会进入setup交互：
 
 <img src="docs/asset/test2.png" alt="setup 交互式向导截图" width="720">
 
