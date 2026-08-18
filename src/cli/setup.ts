@@ -25,7 +25,8 @@ import { isPromptCancelledError, parseQq, Prompter } from './prompt.js'
 import { startDshWebBackground } from './dsh-runner.js'
 
 interface SetupAnswers {
-  qq: number
+  napcatQq: number
+  senderQq: number
   commandPrefix: string
   model: string
   selfLogEnabled: boolean
@@ -41,9 +42,9 @@ export async function runSetup(): Promise<void> {
 
     await preflight(prompt)
     const answers = await collectAnswers(prompt)
-    const logPath = defaultNapcatLogPath(answers.qq, answers.napcatRoot)
+    const logPath = defaultNapcatLogPath(answers.napcatQq, answers.napcatRoot)
 
-    const token = await configureNapcatEnvironment(prompt, answers.qq, answers.napcatRoot)
+    const token = await configureNapcatEnvironment(prompt, answers.napcatQq, answers.napcatRoot)
     if (!token) {
       console.log('\n未能取得 OneBot token。请在 NapCat WebUI 配好正向 WebSocket 后重新运行 setup。')
       process.exitCode = 1
@@ -83,12 +84,13 @@ export async function runSetup(): Promise<void> {
         console.log('但 30 秒内未确认服务可访问，请查看日志确认启动状态。')
       }
       console.log('管理命令: dsh-qq-bridge web status | dsh-qq-bridge web logs | dsh-qq-bridge web stop')
-      console.log(`请在 QQ 发送: ${answers.commandPrefix} ping`)
+      printVerifyGuidance(answers)
       console.log(`如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`)
       printSetupRefreshGuidance()
     } else {
       console.log('\n之后可手动启动 DSH web。')
-      console.log(`启动后发送 ${answers.commandPrefix} ping；如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`)
+      printVerifyGuidance(answers, '启动后')
+      console.log(`如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`)
       printSetupRefreshGuidance()
     }
   } catch (err) {
@@ -122,23 +124,24 @@ async function preflight(prompt: Prompter): Promise<void> {
 }
 
 async function collectAnswers(prompt: Prompter): Promise<SetupAnswers> {
-  const qq = await promptQq(prompt)
-  const commandPrefix = await prompt.text('QQ 指令前缀', '/dsh')
-  const model = await prompt.choice('选择 DSH 模型', ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash')
+  const napcatQq = await promptQq(prompt, '请输入你的QQ号')
+  const commandPrefix = await prompt.text('设置发送指令时的前缀', '/dsh')
+  const model = await prompt.choice('选择模型', ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash')
   const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', true)
+  const senderQq = selfLogEnabled ? napcatQq : await promptQq(prompt, '请输入发送消息的QQ号')
   const dshCheckout = await promptExistingDirectory(
     prompt,
     'DSH / deepseek-harness 目录',
     process.env.DSH_CHECKOUT ?? join(homedir(), 'deepseek-harness'),
   )
   const napcatRoot = await resolveNapcatRoot(prompt)
-  return { qq, commandPrefix, model, selfLogEnabled, dshCheckout, napcatRoot }
+  return { napcatQq, senderQq, commandPrefix, model, selfLogEnabled, dshCheckout, napcatRoot }
 }
 
-async function promptQq(prompt: Prompter): Promise<number> {
+async function promptQq(prompt: Prompter, label: string): Promise<number> {
   while (true) {
     try {
-      return parseQq(await prompt.text('请输入登录 NapCat 的 QQ 号'))
+      return parseQq(await prompt.text(label))
     } catch (err) {
       if (isPromptCancelledError(err)) throw err
       console.log(err instanceof Error ? err.message : String(err))
@@ -171,7 +174,7 @@ async function configureDshProfile(answers: SetupAnswers, logPath: string, token
     pluginName,
     wsUrl: 'ws://127.0.0.1:3001',
     token,
-    adminQq: answers.qq,
+    adminQq: answers.senderQq,
     commandPrefix: answers.commandPrefix,
     provider: 'deepseek-official',
     model: answers.model,
@@ -351,6 +354,14 @@ function restartNapcatForQr(qq: number): void {
   if (restart.status === 0) return
   console.log(`napcat restart 未成功，将执行: napcat start ${qq}`)
   spawnSync('napcat', ['start', String(qq)], { stdio: 'inherit' })
+}
+
+function printVerifyGuidance(answers: SetupAnswers, prefix = '请'): void {
+  if (answers.selfLogEnabled) {
+    console.log(`${prefix}在 QQ 给自己发送: ${answers.commandPrefix} ping`)
+    return
+  }
+  console.log(`${prefix}用 QQ ${answers.senderQq} 给 QQ ${answers.napcatQq} 发送: ${answers.commandPrefix} ping`)
 }
 
 function printSetupRefreshGuidance(): void {

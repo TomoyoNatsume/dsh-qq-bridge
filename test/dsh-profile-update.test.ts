@@ -15,6 +15,19 @@ describe('setup profile patch updater', () => {
     expect(quoted).not.toContain('process.env.DSH_QQ_TOKEN')
   })
 
+  it('writes sender qq as adminQq when self log mode is disabled', () => {
+    const dualAccount = buildBridgeInsertItem({
+      ...itemConfig(),
+      adminQq: 20002,
+      selfLogEnabled: false,
+      selfLogPath: '/home/me/Napcat/log/napcat_10001.log',
+    })
+
+    expect(dualAccount).toContain('adminQq: 20002')
+    expect(dualAccount).toContain('selfLogInput:\n          enabled: false')
+    expect(dualAccount).not.toContain('napcat_10001.log')
+  })
+
   it('replaces only existing dsh-qq-bridge insert item', () => {
     const before = [
       '- id: hmr',

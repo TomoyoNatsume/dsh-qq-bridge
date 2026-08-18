@@ -12,7 +12,7 @@
 QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 ```
 
-推荐先用**一个 QQ 号**登录 NapCat，然后从手机 QQ 给自己发送 `/dsh ...`。这样不需要准备机器人小号和主号两个账号。
+推荐先用**一个 QQ 号**登录 NapCat，然后从手机 QQ 给自己发送 `/dsh ...`。这样不需要准备机器人小号和主号两个账号。也可以选择双号模式:一个 QQ 登录 NapCat，另一个 QQ 负责发送指令。
 
 当前不支持通过 QQ 的“我的电脑”会话交互；“我的电脑”里的消息可以被日志捕获，但回复会回到当前 QQ 自身，交互链路不完整。
 
@@ -21,7 +21,7 @@ QQ 发送 /dsh ... -> NapCat -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 ## 0. 准备
 
 - Node.js 20+ 和 npm。
-- 一个 QQ 号，用手机扫码登录 NapCat。
+- 一个 QQ 号，用手机扫码登录 NapCat。双号模式还需要另一个 QQ 号发送指令。
 - 已安装好的 DSH / DeepSeek Harness，且知道它的项目目录。
 - DeepSeek API Key 已按 DSH 自身方式配置好。
 
@@ -52,14 +52,14 @@ cd ~/.dsh/profiles/web
 pnpm exec dsh-qq-bridge setup
 ```
 
-之后会进入setup交互：
+之后会进入setup交互（大部分选择默认即可）：
 
 <img src="docs/asset/test2.png" alt="setup 交互式向导截图" width="720">
 
 向导会完成这些事:
 
 - 校验 QQ 号格式、DSH / DeepSeek Harness 目录、NapCat 根目录。
-- 用上下键选择模型、是否启用单号模式、是否后台启动 DSH web。
+- 用上下键选择模型、是否启用单号模式、是否后台启动 DSH web；如果选择双号模式，会继续输入发送消息的 QQ 号。
 - 检查 `napcat status <QQ>`；未启动时自动执行 `napcat start <QQ>`。
 - 打印 NapCat 日志路径和 `napcat log <QQ>`，让你自己打开日志扫码登录。
 - 自动配置 NapCat OneBot 正向 WebSocket: `127.0.0.1:3001`，并创建或复用 OneBot access token。
@@ -178,6 +178,8 @@ access:
 如果开启了单号模式的 `selfLogInput`，它会复用同一个 `commandPrefix`，不需要额外改一处。
 
 ### 更改允许使用机器人的 QQ
+
+单号模式下，`adminQq` 和登录 NapCat 的 QQ 是同一个号。双号模式下，`adminQq` 应该填发送消息的 QQ，NapCat / OneBot 仍然使用登录 NapCat 的机器人 QQ。
 
 只允许自己使用时:
 
