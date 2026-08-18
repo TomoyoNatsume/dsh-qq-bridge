@@ -21,7 +21,7 @@ import {
   tryReadOnebotToken,
   updateOnebotConfigFile,
 } from './napcat.js'
-import { parseQq, Prompter } from './prompt.js'
+import { isPromptCancelledError, parseQq, Prompter } from './prompt.js'
 import { startDshWebBackground } from './dsh-runner.js'
 
 interface SetupAnswers {
@@ -90,6 +90,11 @@ export async function runSetup(): Promise<void> {
       printSetupRefreshGuidance()
     }
   } catch (err) {
+    if (isPromptCancelledError(err)) {
+      console.log('\nsetup 已取消。')
+      process.exitCode = 130
+      return
+    }
     console.error(`setup failed: ${err instanceof Error ? err.message : String(err)}`)
     process.exitCode = 1
   } finally {
@@ -133,6 +138,7 @@ async function promptQq(prompt: Prompter): Promise<number> {
     try {
       return parseQq(await prompt.text('请输入登录 NapCat 的 QQ 号'))
     } catch (err) {
+      if (isPromptCancelledError(err)) throw err
       console.log(err instanceof Error ? err.message : String(err))
       console.log('请重新输入 QQ 号。')
     }
@@ -224,6 +230,7 @@ async function prepareOnebot(prompt: Prompter, configPath: string): Promise<stri
     }
     return update.token
   } catch (err) {
+    if (isPromptCancelledError(err)) throw err
     console.warn(`自动配置 OneBot 失败: ${err instanceof Error ? err.message : String(err)}`)
     console.log('\n请改用 NapCat WebUI 手动开启:')
     console.log('  正向 WebSocket / Forward WebSocket')

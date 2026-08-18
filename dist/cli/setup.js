@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { buildBridgeInsertItem, updateSetupProfilePatch, writeProfilePatchWithBackup } from './dsh-profile.js';
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from './dsh-settings.js';
 import { canAcceptUserConfirmedLogin, classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, tryReadOnebotToken, updateOnebotConfigFile, } from './napcat.js';
-import { parseQq, Prompter } from './prompt.js';
+import { isPromptCancelledError, parseQq, Prompter } from './prompt.js';
 import { startDshWebBackground } from './dsh-runner.js';
 export async function runSetup() {
     const prompt = new Prompter();
@@ -72,6 +72,11 @@ export async function runSetup() {
         }
     }
     catch (err) {
+        if (isPromptCancelledError(err)) {
+            console.log('\nsetup 已取消。');
+            process.exitCode = 130;
+            return;
+        }
         console.error(`setup failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exitCode = 1;
     }
@@ -110,6 +115,8 @@ async function promptQq(prompt) {
             return parseQq(await prompt.text('请输入登录 NapCat 的 QQ 号'));
         }
         catch (err) {
+            if (isPromptCancelledError(err))
+                throw err;
             console.log(err instanceof Error ? err.message : String(err));
             console.log('请重新输入 QQ 号。');
         }
@@ -192,6 +199,8 @@ async function prepareOnebot(prompt, configPath) {
         return update.token;
     }
     catch (err) {
+        if (isPromptCancelledError(err))
+            throw err;
         console.warn(`自动配置 OneBot 失败: ${err instanceof Error ? err.message : String(err)}`);
         console.log('\n请改用 NapCat WebUI 手动开启:');
         console.log('  正向 WebSocket / Forward WebSocket');

@@ -1,39 +1,52 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+export class SetupCancelledError extends Error {
+    constructor() {
+        super('setup 已取消。');
+        this.name = 'SetupCancelledError';
+    }
+}
 export class Prompter {
     rl;
+    abortController = new AbortController();
+    sigintHandler = () => {
+        this.cancel();
+    };
+    constructor() {
+        process.once('SIGINT', this.sigintHandler);
+    }
     async text(label, fallback) {
         if (useInquirer()) {
             const prompts = await loadInquirer();
             if (prompts) {
-                const answer = await prompts.input({
+                const answer = await this.ask((signal) => prompts.input({
                     message: label,
                     default: fallback,
-                });
+                }, { input, output, signal }));
                 return answer.trim() || fallback || '';
             }
         }
         const suffix = fallback ? ` (${fallback})` : '';
-        const answer = (await this.readline().question(`${label}${suffix}: `)).trim();
+        const answer = (await this.ask((signal) => this.readline().question(`${label}${suffix}: `, { signal }))).trim();
         return answer || fallback || '';
     }
     async confirm(label, fallback = true) {
         if (useInquirer()) {
             const prompts = await loadInquirer();
             if (prompts) {
-                return prompts.select({
+                return this.ask((signal) => prompts.select({
                     message: label,
                     choices: [
                         { name: '是', value: true },
                         { name: '否', value: false },
                     ],
                     default: fallback,
-                });
+                }, { input, output, signal }));
             }
         }
         while (true) {
             const hint = fallback ? 'Y/n' : 'y/N';
-            const answer = (await this.readline().question(`${label} [${hint}]: `)).trim();
+            const answer = (await this.ask((signal) => this.readline().question(`${label} [${hint}]: `, { signal }))).trim();
             const parsed = resolveConfirm(answer, fallback);
             if (parsed !== null)
                 return parsed;
@@ -44,17 +57,17 @@ export class Prompter {
         if (useInquirer()) {
             const prompts = await loadInquirer();
             if (prompts) {
-                return prompts.select({
+                return this.ask((signal) => prompts.select({
                     message: label,
                     choices: choices.map((choice) => ({ name: choice, value: choice })),
                     default: fallback,
-                });
+                }, { input, output, signal }));
             }
         }
         while (true) {
             output.write(`${label}\n`);
             choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice}\n`));
-            const answer = (await this.readline().question(`选择 (${fallback}): `)).trim();
+            const answer = (await this.ask((signal) => this.readline().question(`选择 (${fallback}): `, { signal }))).trim();
             const parsed = resolveChoice(answer, choices, fallback);
             if (parsed !== null)
                 return parsed;
@@ -62,11 +75,29 @@ export class Prompter {
         }
     }
     close() {
+        process.removeListener('SIGINT', this.sigintHandler);
+        this.rl?.close();
+    }
+    cancel() {
+        if (!this.abortController.signal.aborted)
+            this.abortController.abort(new SetupCancelledError());
         this.rl?.close();
     }
     readline() {
         this.rl ??= createInterface({ input, output });
         return this.rl;
+    }
+    async ask(question) {
+        if (this.abortController.signal.aborted)
+            throw new SetupCancelledError();
+        try {
+            return await question(this.abortController.signal);
+        }
+        catch (err) {
+            if (isPromptCancelledError(err))
+                throw new SetupCancelledError();
+            throw err;
+        }
     }
 }
 export function parseQq(value) {
@@ -95,6 +126,18 @@ export function resolveChoice(answer, choices, fallback) {
     if (Number.isInteger(index) && index >= 1 && index <= choices.length)
         return choices[index - 1];
     return choices.includes(trimmed) ? trimmed : null;
+}
+export function isPromptCancelledError(err) {
+    if (err instanceof SetupCancelledError)
+        return true;
+    if (!(err instanceof Error))
+        return false;
+    return [
+        'AbortError',
+        'AbortPromptError',
+        'CancelPromptError',
+        'ExitPromptError',
+    ].includes(err.name);
 }
 function useInquirer() {
     return Boolean(input.isTTY && output.isTTY);

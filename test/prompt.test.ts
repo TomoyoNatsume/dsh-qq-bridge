@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseQq, resolveChoice, resolveConfirm } from '../src/cli/prompt.js'
+import { isPromptCancelledError, parseQq, resolveChoice, resolveConfirm, SetupCancelledError } from '../src/cli/prompt.js'
 
 describe('setup prompt validators', () => {
   it('accepts valid QQ numbers and rejects invalid input', () => {
@@ -23,5 +23,17 @@ describe('setup prompt validators', () => {
     expect(resolveChoice('二维码过期', choices, '是')).toBe('二维码过期')
     expect(resolveChoice('否', choices, '是')).toBeNull()
     expect(resolveChoice('3', choices, '是')).toBeNull()
+  })
+
+  it('recognizes Ctrl+C style prompt cancellation errors', () => {
+    const abort = new Error('The operation was aborted')
+    abort.name = 'AbortError'
+    const exit = new Error('User force closed the prompt with SIGINT')
+    exit.name = 'ExitPromptError'
+
+    expect(isPromptCancelledError(new SetupCancelledError())).toBe(true)
+    expect(isPromptCancelledError(abort)).toBe(true)
+    expect(isPromptCancelledError(exit)).toBe(true)
+    expect(isPromptCancelledError(new Error('ordinary failure'))).toBe(false)
   })
 })
