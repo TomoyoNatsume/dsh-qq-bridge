@@ -1,18 +1,20 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import type { Interface } from 'node:readline/promises'
-import { input as inquirerInput, select as inquirerSelect } from '@inquirer/prompts'
 
 export class Prompter {
   private rl: Interface | undefined
 
   async text(label: string, fallback?: string): Promise<string> {
     if (useInquirer()) {
-      const answer = await inquirerInput({
-        message: label,
-        default: fallback,
-      })
-      return answer.trim() || fallback || ''
+      const prompts = await loadInquirer()
+      if (prompts) {
+        const answer = await prompts.input({
+          message: label,
+          default: fallback,
+        })
+        return answer.trim() || fallback || ''
+      }
     }
     const suffix = fallback ? ` (${fallback})` : ''
     const answer = (await this.readline().question(`${label}${suffix}: `)).trim()
@@ -21,14 +23,17 @@ export class Prompter {
 
   async confirm(label: string, fallback = true): Promise<boolean> {
     if (useInquirer()) {
-      return inquirerSelect({
-        message: label,
-        choices: [
-          { name: '是', value: true },
-          { name: '否', value: false },
-        ],
-        default: fallback,
-      })
+      const prompts = await loadInquirer()
+      if (prompts) {
+        return prompts.select({
+          message: label,
+          choices: [
+            { name: '是', value: true },
+            { name: '否', value: false },
+          ],
+          default: fallback,
+        })
+      }
     }
     while (true) {
       const hint = fallback ? 'Y/n' : 'y/N'
@@ -41,11 +46,14 @@ export class Prompter {
 
   async choice(label: string, choices: readonly string[], fallback: string): Promise<string> {
     if (useInquirer()) {
-      return inquirerSelect({
-        message: label,
-        choices: choices.map((choice) => ({ name: choice, value: choice })),
-        default: fallback,
-      })
+      const prompts = await loadInquirer()
+      if (prompts) {
+        return prompts.select({
+          message: label,
+          choices: choices.map((choice) => ({ name: choice, value: choice })),
+          default: fallback,
+        })
+      }
     }
     while (true) {
       output.write(`${label}\n`)
@@ -92,4 +100,22 @@ export function resolveChoice(answer: string, choices: readonly string[], fallba
 
 function useInquirer(): boolean {
   return Boolean(input.isTTY && output.isTTY)
+}
+
+type InquirerPrompts = typeof import('@inquirer/prompts')
+
+let inquirer: Promise<InquirerPrompts> | undefined
+let warnedInquirerFallback = false
+
+async function loadInquirer(): Promise<InquirerPrompts | null> {
+  inquirer ??= import('@inquirer/prompts')
+  try {
+    return await inquirer
+  } catch (err) {
+    if (!warnedInquirerFallback) {
+      warnedInquirerFallback = true
+      output.write(`交互式选择器不可用，已退回普通输入模式。原因: ${err instanceof Error ? err.message : String(err)}\n`)
+    }
+    return null
+  }
 }
