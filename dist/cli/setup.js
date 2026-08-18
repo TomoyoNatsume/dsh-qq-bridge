@@ -34,6 +34,7 @@ export async function runSetup() {
                 if (result.pid !== null)
                     console.log(`管理 PID: ${result.pid}`);
                 console.log('已跳过后台启动，避免重复启动多个 DSH web。');
+                console.log('setup 已写入新的 QQ bridge 配置；首次 setup 或更改配置后，请重启 DSH web 再验证 QQ 消息。');
             }
             else if (result.alreadyRunning) {
                 console.log('检测到 DSH web 管理进程正在运行，但服务暂不可访问。');
@@ -42,6 +43,7 @@ export async function runSetup() {
                 console.log(`地址: ${result.url}`);
                 console.log(`日志: ${result.logPath}`);
                 console.log('请查看日志确认启动状态。');
+                console.log('setup 已写入新的 QQ bridge 配置；如果这是旧的 DSH web 进程，请重启后再验证 QQ 消息。');
             }
             else if (result.ready) {
                 console.log('DSH web 后台启动成功。');

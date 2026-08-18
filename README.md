@@ -83,6 +83,7 @@ node dist/main.js setup
 - 最后生成并写入 `~/.dsh/profiles/web/cordis.patch.yml`，只增改 `insert` 下的 `id: dsh-qq-bridge`，并保留写入前备份；如果 setup 中途退出，不会提前写入这个文件。
 - 写入 `~/.dsh/settings.yaml`，把后续新建 DSH Web 会话的默认权限设为 Full access。
 - 可选后台启动 DSH web；如果 `http://127.0.0.1:3080` 已经可访问，会跳过启动，避免重复起服务。后台启动会写 `/tmp/dsh-qq-bridge-dsh-web.pid` 和 `/tmp/dsh-qq-bridge-dsh-web.log`。
+- 如果 setup 时检测到 DSH web 已经在运行，会提示先重启 DSH web；首次 setup 或更改配置后，旧进程不一定已加载新的 QQ bridge 配置。
 - 完成时提示重新 setup 的触发条件。OneBot token 会写入本机的 `cordis.patch.yml`，DSH 默认权限会写入本机的 `settings.yaml`，重启 DSH web 时不需要再导出 `DSH_QQ_TOKEN` 或 `DSH_PERMISSION_MODE`。
 
 在普通终端中，选项题支持上下键选择、回车确认；如果运行环境不支持交互式 TTY，会自动退回到输入序号/文本的模式。输入不合法时会重复当前问题，不会直接退出。
