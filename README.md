@@ -47,6 +47,20 @@ napcat help
 
 ## 2. 构建并运行向导
 
+### 方式 A:通过 DSH 插件管理安装
+
+```bash
+pnpm dsh plugin --profile web add github:TomoyoNatsume/dsh-qq-bridge
+cd ~/.dsh/profiles/web
+pnpm exec dsh-qq-bridge setup
+```
+
+`dsh plugin ... add` 只会把本项目安装到 DSH web profile 的依赖里。它不会自动挂载插件，也不会改 `cordis.patch.yml`，因此安装后不影响正常 `pnpm dsh web` 启动。真正的 QQ / NapCat / DSH profile 配置由 `dsh-qq-bridge setup` 完成。
+
+安装完成时也会打印 setup 提示。如果使用 pnpm 10 安装 GitHub 源码包时提示需要允许 build script，请按 DSH / pnpm 打印的 `allowBuilds` 提示处理后重新执行 add；这是为了让 GitHub 源码安装时生成 `dist/` 和 `dsh-qq-bridge` 命令。
+
+### 方式 B:本地 clone 构建
+
 ```bash
 git clone https://github.com/TomoyoNatsume/dsh-qq-bridge.git
 cd dsh-qq-bridge
