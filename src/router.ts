@@ -21,6 +21,10 @@ export interface Handler {
   run(ctx: HandlerContext): Promise<void>
 }
 
+export interface PendingReplyHandler {
+  handle(ctx: HandlerContext): Promise<boolean>
+}
+
 export type OutboundSender = (
   scope: 'private' | 'group',
   targetId: MessageTargetId,
@@ -37,6 +41,7 @@ export class MessageRouter {
   constructor(
     private readonly gate: AccessGate,
     private readonly outbound: OutboundSender,
+    private readonly pendingReply?: PendingReplyHandler,
   ) {}
 
   register(handler: Handler): () => void {
@@ -78,6 +83,8 @@ export class MessageRouter {
       payload,
       respond,
     }
+
+    if (await this.pendingReply?.handle(ctx)) return true
 
     let consumed = false
     for (const handler of this.handlers.values()) {

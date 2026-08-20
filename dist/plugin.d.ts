@@ -1,6 +1,7 @@
 import { DshQqBridgeConfig } from './config.js';
 import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js';
 import type { MessageTargetId } from './onebot/types.js';
+import { InteractionCtxLike } from './interactions.js';
 /** DSH live agent 最小画面。 */
 interface DshAgent {
     followup(message: {
@@ -12,7 +13,7 @@ interface DshAgent {
     whenIdle(): Promise<void>;
 }
 /** 结构性描述 DSH 服务;不硬依赖 DSH 内部类型。 */
-interface DshCtx {
+interface DshCtx extends InteractionCtxLike {
     agentLoop?: {
         createAgent(ownerCtx: unknown, options: {
             sessionId: string;
@@ -35,8 +36,15 @@ interface DshCtx {
             events: readonly unknown[];
         }>;
     };
-    /** cordis 事件订阅(session/event 广播)。 */
-    on?(event: string, cb: (subject: DshSessionSubject, event: unknown) => void): () => void;
+    on?(event: 'session/event', cb: (subject: DshSessionSubject, event: unknown) => void, options?: {
+        prepend?: boolean;
+    }): () => void;
+    on?(event: 'approval/request', cb: (...args: never[]) => unknown, options?: {
+        prepend?: boolean;
+    }): () => void;
+    on?(event: string, cb: (...args: never[]) => unknown, options?: {
+        prepend?: boolean;
+    }): () => void;
 }
 interface DshSessionSubject {
     id?: string;

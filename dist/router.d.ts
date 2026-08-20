@@ -18,6 +18,9 @@ export interface Handler {
     test(payload: string): boolean;
     run(ctx: HandlerContext): Promise<void>;
 }
+export interface PendingReplyHandler {
+    handle(ctx: HandlerContext): Promise<boolean>;
+}
 export type OutboundSender = (scope: 'private' | 'group', targetId: MessageTargetId, text: string, replyTarget?: PlatformReplyTarget) => Promise<void>;
 /**
  * C 骨架:消息分发器。注册 handler,按前缀 + 匹配路由。
@@ -25,8 +28,9 @@ export type OutboundSender = (scope: 'private' | 'group', targetId: MessageTarge
 export declare class MessageRouter {
     private readonly gate;
     private readonly outbound;
+    private readonly pendingReply?;
     private handlers;
-    constructor(gate: AccessGate, outbound: OutboundSender);
+    constructor(gate: AccessGate, outbound: OutboundSender, pendingReply?: PendingReplyHandler | undefined);
     register(handler: Handler): () => void;
     /**
      * 处理一条入站消息:

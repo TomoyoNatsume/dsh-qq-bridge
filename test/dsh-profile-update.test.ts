@@ -34,6 +34,8 @@ describe('setup profile patch updater', () => {
 
     expect(dualAccount).toContain('adminQq: 20002')
     expect(dualAccount).toContain('selfLogInput:\n          enabled: false')
+    expect(dualAccount).toContain('qqMessageStyle:\n            enabled: true')
+    expect(dualAccount).toContain('不要写入记忆系统')
     expect(dualAccount).not.toContain('napcat_10001.log')
   })
 
@@ -57,6 +59,8 @@ describe('setup profile patch updater', () => {
     expect(official).toContain('sandbox: true')
     expect(official).toContain('notifications:\n          agentReply:\n            enabled: false')
     expect(official).toContain('adminQq: 0')
+    expect(official).toContain('qqMessageStyle:\n            enabled: true')
+    expect(official).toContain('不要影响其它 DSH 对话')
   })
 
   it('replaces only existing dsh-qq-bridge insert item', () => {

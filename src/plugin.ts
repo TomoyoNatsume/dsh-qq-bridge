@@ -11,6 +11,7 @@ import { NapcatSelfLogInput } from './inputs/napcat-log.js'
 import { homedir } from 'node:os'
 import { TencentOfficialBotClient } from './official/client.js'
 import type { MessageTargetId } from './onebot/types.js'
+import { InteractionCtxLike, QqInteractionBridge } from './interactions.js'
 
 /** DSH live agent 最小画面。 */
 interface DshAgent {
@@ -19,7 +20,7 @@ interface DshAgent {
 }
 
 /** 结构性描述 DSH 服务;不硬依赖 DSH 内部类型。 */
-interface DshCtx {
+interface DshCtx extends InteractionCtxLike {
   agentLoop?: {
     createAgent(
       ownerCtx: unknown,
@@ -37,8 +38,17 @@ interface DshCtx {
   sessionQuery?: {
     readSurface(sessionId: string): Promise<{ events: readonly unknown[] }>
   }
-  /** cordis 事件订阅(session/event 广播)。 */
-  on?(event: string, cb: (subject: DshSessionSubject, event: unknown) => void): () => void
+  on?(
+    event: 'session/event',
+    cb: (subject: DshSessionSubject, event: unknown) => void,
+    options?: { prepend?: boolean },
+  ): () => void
+  on?(
+    event: 'approval/request',
+    cb: (...args: never[]) => unknown,
+    options?: { prepend?: boolean },
+  ): () => void
+  on?(event: string, cb: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void
 }
 
 interface DshSessionSubject {
@@ -90,9 +100,11 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     if (scope === 'private') await client.sendPrivate(targetId, text, replyTarget)
     else await client.sendGroup(targetId, text, replyTarget)
   }
-  const router = new MessageRouter(gate, outbound)
+  const interactions = new QqInteractionBridge(outbound)
+  const unregisterInteractions = interactions.register(ctx)
+  const router = new MessageRouter(gate, outbound, interactions)
 
-  const executor = makeDshExecutor(ctx, cfg.agent)
+  const executor = makeDshExecutor(ctx, cfg.agent, interactions)
   const unregisterAgent = router.register(new AgentRpcHandler(executor, {
     streamText: cfg.agent.streamText,
     streamReasoning: cfg.agent.streamReasoning,
@@ -100,6 +112,7 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     ackMessage: cfg.agent.ackMessage,
     timeoutMs: cfg.agent.timeoutMs,
     timeoutMessage: cfg.agent.timeoutMessage,
+    qqMessageStyle: cfg.agent.qqMessageStyle,
   }))
 
   let unregisterShell: () => void = () => {}
@@ -138,6 +151,7 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
   return async () => {
     unregisterAgent()
     unregisterShell()
+    unregisterInteractions()
     unsubMessages()
     replyNotifier()
     selfLogInput?.stop()
@@ -153,8 +167,12 @@ export function agentReplyNotificationsEnabled(cfg: DshQqBridgeConfig): boolean 
   return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official'
 }
 
-function makeDshExecutor(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; model?: string }) {
-  const handles = wireDsh(ctx, agentCfg)
+function makeDshExecutor(
+  ctx: DshCtx,
+  agentCfg?: { preset?: string; provider?: string; model?: string },
+  interactions?: QqInteractionBridge,
+) {
+  const handles = wireDsh(ctx, agentCfg, interactions)
   if (handles) return new DshAgentExecutor(handles)
   // 无 DSH 服务时占位,便于纯 CLI / 测试
   const fallback = {
@@ -170,7 +188,11 @@ function makeDshExecutor(ctx: DshCtx, agentCfg?: { preset?: string; provider?: s
 }
 
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
-function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; model?: string }) {
+function wireDsh(
+  ctx: DshCtx,
+  agentCfg?: { preset?: string; provider?: string; model?: string },
+  interactions?: QqInteractionBridge,
+) {
   const loop = ctx.agentLoop
   if (!loop) return undefined
   const query = ctx.sessionQuery
@@ -195,6 +217,7 @@ function wireDsh(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; m
           ? { setup: async (agentCtx: unknown) => void await ctx.agentPresets!.mount(agentCtx, agentCfg.preset) }
           : {}),
       })
+      interactions?.bindAgent(options.sessionKey, handle.agent)
       // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
       const session = (handle.agent as { session?: { id?: string } }).session
       return {

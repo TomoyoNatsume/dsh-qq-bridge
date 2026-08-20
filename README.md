@@ -295,6 +295,32 @@ agent:
 
 `timeoutMs` 是等待 Agent 的最长时间，单位毫秒；超时后回复 `timeoutMessage`。
 
+### QQ 回复风格
+
+QQ 入口会给 Agent 追加固定回复风格提示，只影响通过本插件进入的 QQ 消息，不影响你在 DSH Web 里的普通对话：
+
+```yaml
+agent:
+  qqMessageStyle:
+    enabled: true
+    prompt: |-
+      仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。
+      通过 QQ 回复时:
+      1. 先给结论。
+      2. 回复尽量简明扼要。
+      3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。
+```
+
+每个 Agent 回合都会追加一句 `本次回复使用QQ Session Temporary Reply Style。`；第 1、30、60... 个 Agent 回合会重复完整固定规则，防止长上下文里被冲淡。
+
+如果不想要 QQ 专属回复风格，改成：
+
+```yaml
+agent:
+  qqMessageStyle:
+    enabled: false
+```
+
 ### 更改指令前缀
 
 修改 `access.commandPrefix`：

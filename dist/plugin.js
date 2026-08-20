@@ -9,6 +9,7 @@ import { DshQqBridgeConfig } from './config.js';
 import { NapcatSelfLogInput } from './inputs/napcat-log.js';
 import { homedir } from 'node:os';
 import { TencentOfficialBotClient } from './official/client.js';
+import { QqInteractionBridge } from './interactions.js';
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
@@ -42,8 +43,10 @@ export async function apply(ctx, options) {
         else
             await client.sendGroup(targetId, text, replyTarget);
     };
-    const router = new MessageRouter(gate, outbound);
-    const executor = makeDshExecutor(ctx, cfg.agent);
+    const interactions = new QqInteractionBridge(outbound);
+    const unregisterInteractions = interactions.register(ctx);
+    const router = new MessageRouter(gate, outbound, interactions);
+    const executor = makeDshExecutor(ctx, cfg.agent, interactions);
     const unregisterAgent = router.register(new AgentRpcHandler(executor, {
         streamText: cfg.agent.streamText,
         streamReasoning: cfg.agent.streamReasoning,
@@ -51,6 +54,7 @@ export async function apply(ctx, options) {
         ackMessage: cfg.agent.ackMessage,
         timeoutMs: cfg.agent.timeoutMs,
         timeoutMessage: cfg.agent.timeoutMessage,
+        qqMessageStyle: cfg.agent.qqMessageStyle,
     }));
     let unregisterShell = () => { };
     if (cfg.shell.enabled) {
@@ -81,6 +85,7 @@ export async function apply(ctx, options) {
     return async () => {
         unregisterAgent();
         unregisterShell();
+        unregisterInteractions();
         unsubMessages();
         replyNotifier();
         selfLogInput?.stop();
@@ -93,8 +98,8 @@ export default { name, inject, apply };
 export function agentReplyNotificationsEnabled(cfg) {
     return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official';
 }
-function makeDshExecutor(ctx, agentCfg) {
-    const handles = wireDsh(ctx, agentCfg);
+function makeDshExecutor(ctx, agentCfg, interactions) {
+    const handles = wireDsh(ctx, agentCfg, interactions);
     if (handles)
         return new DshAgentExecutor(handles);
     // 无 DSH 服务时占位,便于纯 CLI / 测试
@@ -110,7 +115,7 @@ function makeDshExecutor(ctx, agentCfg) {
     return new DshAgentExecutor(fallback);
 }
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
-function wireDsh(ctx, agentCfg) {
+function wireDsh(ctx, agentCfg, interactions) {
     const loop = ctx.agentLoop;
     if (!loop)
         return undefined;
@@ -136,6 +141,7 @@ function wireDsh(ctx, agentCfg) {
                     ? { setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, agentCfg.preset) }
                     : {}),
             });
+            interactions?.bindAgent(options.sessionKey, handle.agent);
             // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
             const session = handle.agent.session;
             return {

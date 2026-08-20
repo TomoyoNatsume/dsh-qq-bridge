@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { MessageRouter } from '../src/router.js'
 import { AccessGate } from '../src/security.js'
-import { AgentRpcHandler, splitText } from '../src/handlers/agent.js'
+import { AgentRpcHandler, formatQqMessageStylePrompt, splitText } from '../src/handlers/agent.js'
 import { ShellHandler } from '../src/handlers/shell.js'
 import { OnebotMessageEvent } from '../src/onebot/types.js'
 
@@ -39,6 +39,57 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(consumed).toBe(true)
     expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello world')
     expect(sent).toEqual(['收到，正在处理...', 'echo:hello world'])
+  })
+
+  it('QQ style prompt 只在显式启用时包装 agent payload', async () => {
+    expect(formatQqMessageStylePrompt('hello')).toBe('hello')
+
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const executor = { run: vi.fn(async () => 'ok') }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, {
+      qqMessageStyle: { enabled: true },
+    }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello' }))
+
+    expect(executor.run).toHaveBeenCalledWith(
+      'private:10001',
+      expect.stringContaining('QQ Session Temporary Reply Style:\n本次回复使用QQ Session Temporary Reply Style'),
+    )
+    expect(executor.run).toHaveBeenCalledWith(
+      'private:10001',
+      expect.stringContaining('User QQ Message:\nhello'),
+    )
+    expect(sent).toEqual(['收到，正在处理...', 'ok'])
+  })
+
+  it('默认 QQ 回复风格按会话回合注入短提示与完整规则', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const executor = { run: vi.fn(async () => 'ok') }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, {
+      ackMessage: '',
+      qqMessageStyle: { enabled: true },
+    }))
+
+    for (let i = 1; i <= 30; i++) {
+      await router.route(makeEvent({ user_id: 10001, raw_message: `/dsh q${i}` }))
+    }
+
+    const firstPayload = executor.run.mock.calls[0]?.[1]
+    const secondPayload = executor.run.mock.calls[1]?.[1]
+    const thirtiethPayload = executor.run.mock.calls[29]?.[1]
+    expect(firstPayload).toContain('本次回复使用QQ Session Temporary Reply Style')
+    expect(firstPayload).toContain('固定回复风格规则:\n仅本次 QQ 对话适用')
+    expect(secondPayload).toContain('本次回复使用QQ Session Temporary Reply Style')
+    expect(secondPayload).not.toContain('固定回复风格规则')
+    expect(thirtiethPayload).toContain('固定回复风格规则:\n仅本次 QQ 对话适用')
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh style 请用别的风格' }))
+    expect(executor.run.mock.calls.at(-1)?.[1]).toContain('User QQ Message:\nstyle 请用别的风格')
   })
 
   it('回发失败只记录警告,不让 route 抛错拖垮 host', async () => {

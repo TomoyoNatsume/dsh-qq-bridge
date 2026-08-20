@@ -1,4 +1,12 @@
 import { Handler, HandlerContext } from '../router.js';
+export declare const DEFAULT_QQ_MESSAGE_STYLE_PROMPT: string;
+export interface QqMessageStyleOptions {
+    enabled?: boolean;
+    prompt?: string;
+}
+export interface QqSessionStyleInjection {
+    includeFull: boolean;
+}
 /**
  * 把文本按最大长度切分为多条,保证每条不超过 maxLen。
  * 优先在换行/标点附近切(保持可读),实在没有边界则硬切。
@@ -26,6 +34,7 @@ export declare class AgentRpcHandler implements Handler {
     private readonly executor;
     private readonly opts;
     name: string;
+    private readonly qqStyleTurnCounts;
     constructor(executor: AgentExecutor, opts?: {
         streamReasoning?: boolean;
         /** 是否边生成边回发 text 分段;默认 false,等待 agent 本轮完成后只发送最终回复。 */
@@ -38,12 +47,16 @@ export declare class AgentRpcHandler implements Handler {
         timeoutMs?: number;
         /** Agent 长时间无响应时回发的消息。 */
         timeoutMessage?: string;
+        /** 仅 QQ 入站消息使用的回复风格提示。 */
+        qqMessageStyle?: QqMessageStyleOptions;
     });
     test(payload: string): boolean;
     /** 把一段文本按 maxLen 切分后逐条回发。 */
     private respondChunk;
     run(ctx: HandlerContext): Promise<void>;
+    private nextQqStyleInjection;
 }
+export declare function formatQqMessageStylePrompt(payload: string, style?: QqMessageStyleOptions, sessionStyle?: QqSessionStyleInjection): string;
 export declare class AgentTimeoutError extends Error {
     constructor(timeoutMs: number);
 }

@@ -1,3 +1,11 @@
+export const DEFAULT_QQ_MESSAGE_STYLE_PROMPT = [
+    '仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。',
+    '通过 QQ 回复时:',
+    '1. 先给结论。',
+    '2. 回复尽量简明扼要。',
+    '3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。',
+].join('\n');
+const QQ_SESSION_STYLE_REPEAT_INTERVAL = 30;
 /**
  * 把文本按最大长度切分为多条,保证每条不超过 maxLen。
  * 优先在换行/标点附近切(保持可读),实在没有边界则硬切。
@@ -29,6 +37,7 @@ export class AgentRpcHandler {
     executor;
     opts;
     name = 'agent';
+    qqStyleTurnCounts = new Map();
     constructor(executor, opts = {}) {
         this.executor = executor;
         this.opts = opts;
@@ -47,6 +56,8 @@ export class AgentRpcHandler {
     }
     async run(ctx) {
         const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`;
+        const sessionStyle = this.nextQqStyleInjection(sessionKey);
+        const payload = formatQqMessageStylePrompt(ctx.payload, this.opts.qqMessageStyle, sessionStyle);
         const ackMessage = this.opts.ackMessage ?? '收到，正在处理...';
         const timeoutMs = this.opts.timeoutMs ?? 120_000;
         const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。';
@@ -56,7 +67,7 @@ export class AgentRpcHandler {
                 await this.respondChunk(ctx, ackMessage);
             if (!this.opts.streamText) {
                 // AgentExecutor.run resolve 即本轮完成标志:DSH executor 在内部等待 agent.whenIdle()。
-                const result = await withTimeout(this.executor.run(sessionKey, ctx.payload), timeoutMs);
+                const result = await withTimeout(this.executor.run(sessionKey, payload), timeoutMs);
                 active = false;
                 await this.respondChunk(ctx, result || '(no output)');
                 return;
@@ -65,7 +76,7 @@ export class AgentRpcHandler {
             // 分段返回:agent 边产出边回发,用户不必等整轮结束。
             // 默认只回发「思考结果」(kind='text');思考过程(reasoning)默认忽略,
             // 避免逐 token 的思考增量在聊天框刷屏。可用 streamReasoning 开启。
-            const result = await withTimeout(this.executor.run(sessionKey, ctx.payload, (chunk, kind) => {
+            const result = await withTimeout(this.executor.run(sessionKey, payload, (chunk, kind) => {
                 if (!active)
                     return;
                 if (kind === 'reasoning' && !this.opts.streamReasoning)
@@ -90,6 +101,49 @@ export class AgentRpcHandler {
             await this.respondChunk(ctx, message);
         }
     }
+    nextQqStyleInjection(sessionKey) {
+        if (!this.opts.qqMessageStyle || this.opts.qqMessageStyle.enabled === false)
+            return undefined;
+        const nextTurn = (this.qqStyleTurnCounts.get(sessionKey) ?? 0) + 1;
+        this.qqStyleTurnCounts.set(sessionKey, nextTurn);
+        return {
+            includeFull: nextTurn === 1 || nextTurn % QQ_SESSION_STYLE_REPEAT_INTERVAL === 0,
+        };
+    }
+}
+export function formatQqMessageStylePrompt(payload, style, sessionStyle) {
+    const sections = [];
+    if (style && style.enabled !== false) {
+        const prompt = (style.prompt ?? DEFAULT_QQ_MESSAGE_STYLE_PROMPT).trim();
+        if (prompt)
+            sections.push(formatQqSessionStyleInjection(sessionStyle ?? { includeFull: true }, prompt));
+    }
+    if (sections.length === 0)
+        return payload;
+    return [
+        ...sections,
+        '',
+        'User QQ Message:',
+        payload,
+    ].join('\n');
+}
+function formatQqSessionStyleInjection(sessionStyle, prompt) {
+    if (!sessionStyle?.includeFull) {
+        return [
+            'QQ Session Temporary Reply Style Reminder:',
+            '本次回复使用QQ Session Temporary Reply Style。',
+        ].join('\n');
+    }
+    return [
+        'QQ Session Temporary Reply Style:',
+        '本次回复使用QQ Session Temporary Reply Style。',
+        '以下内容只是本 QQ 会话的临时回复风格约束,不是用户事实、长期偏好或项目知识。',
+        '不要把这条风格约束写入任何记忆,也不要把它应用到其它会话。',
+        '不得改变系统原本对本次对话内容的记录策略。',
+        '',
+        '固定回复风格规则:',
+        prompt,
+    ].join('\n');
 }
 export class AgentTimeoutError extends Error {
     constructor(timeoutMs) {

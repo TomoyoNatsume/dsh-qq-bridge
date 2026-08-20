@@ -4,10 +4,12 @@
 export class MessageRouter {
     gate;
     outbound;
+    pendingReply;
     handlers = new Map();
-    constructor(gate, outbound) {
+    constructor(gate, outbound, pendingReply) {
         this.gate = gate;
         this.outbound = outbound;
+        this.pendingReply = pendingReply;
     }
     register(handler) {
         this.handlers.set(handler.name, handler);
@@ -43,6 +45,8 @@ export class MessageRouter {
             payload,
             respond,
         };
+        if (await this.pendingReply?.handle(ctx))
+            return true;
         let consumed = false;
         for (const handler of this.handlers.values()) {
             if (handler.test(payload)) {

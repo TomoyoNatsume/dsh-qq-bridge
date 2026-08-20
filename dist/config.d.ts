@@ -74,6 +74,17 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         timeoutMs: z.ZodDefault<z.ZodNumber>;
         /** Agent 长时间无响应时回发的消息。 */
         timeoutMessage: z.ZodDefault<z.ZodString>;
+        /** 仅 QQ 入站消息使用的回复风格提示,不会影响其它 DSH 会话。 */
+        qqMessageStyle: z.ZodDefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            prompt: z.ZodDefault<z.ZodString>;
+        }, "strip", z.ZodTypeAny, {
+            enabled: boolean;
+            prompt: string;
+        }, {
+            enabled?: boolean | undefined;
+            prompt?: string | undefined;
+        }>>;
     }, "strip", z.ZodTypeAny, {
         preset: string;
         provider: string;
@@ -84,6 +95,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage: string;
         timeoutMs: number;
         timeoutMessage: string;
+        qqMessageStyle: {
+            enabled: boolean;
+            prompt: string;
+        };
     }, {
         preset?: string | undefined;
         provider?: string | undefined;
@@ -94,6 +109,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage?: string | undefined;
         timeoutMs?: number | undefined;
         timeoutMessage?: string | undefined;
+        qqMessageStyle?: {
+            enabled?: boolean | undefined;
+            prompt?: string | undefined;
+        } | undefined;
     }>>;
     shell: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -141,24 +160,12 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         replayOnStart?: boolean | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    napcat: {
-        wsUrl: string;
-        guideDoc: string;
-        token?: string | undefined;
-    };
     official: {
         appId: string;
         appSecret: string;
         adminOpenId: string;
         allowlistOpenIds: string[];
         sandbox: boolean;
-    };
-    platform: "napcat" | "official";
-    access: {
-        adminQq: number;
-        allowlist: number[];
-        commandPrefix: string;
-        mode: "whitelist" | "open";
     };
     agent: {
         preset: string;
@@ -170,6 +177,22 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage: string;
         timeoutMs: number;
         timeoutMessage: string;
+        qqMessageStyle: {
+            enabled: boolean;
+            prompt: string;
+        };
+    };
+    napcat: {
+        wsUrl: string;
+        guideDoc: string;
+        token?: string | undefined;
+    };
+    platform: "official" | "napcat";
+    access: {
+        adminQq: number;
+        allowlist: number[];
+        commandPrefix: string;
+        mode: "whitelist" | "open";
     };
     shell: {
         enabled: boolean;
@@ -186,24 +209,12 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         logPath?: string | undefined;
     };
 }, {
-    napcat?: {
-        wsUrl?: string | undefined;
-        token?: string | undefined;
-        guideDoc?: string | undefined;
-    } | undefined;
     official?: {
         appId?: string | undefined;
         appSecret?: string | undefined;
         adminOpenId?: string | undefined;
         allowlistOpenIds?: string[] | undefined;
         sandbox?: boolean | undefined;
-    } | undefined;
-    platform?: "napcat" | "official" | undefined;
-    access?: {
-        adminQq: number;
-        allowlist?: number[] | undefined;
-        commandPrefix?: string | undefined;
-        mode?: "whitelist" | "open" | undefined;
     } | undefined;
     agent?: {
         preset?: string | undefined;
@@ -215,6 +226,22 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage?: string | undefined;
         timeoutMs?: number | undefined;
         timeoutMessage?: string | undefined;
+        qqMessageStyle?: {
+            enabled?: boolean | undefined;
+            prompt?: string | undefined;
+        } | undefined;
+    } | undefined;
+    napcat?: {
+        wsUrl?: string | undefined;
+        token?: string | undefined;
+        guideDoc?: string | undefined;
+    } | undefined;
+    platform?: "official" | "napcat" | undefined;
+    access?: {
+        adminQq: number;
+        allowlist?: number[] | undefined;
+        commandPrefix?: string | undefined;
+        mode?: "whitelist" | "open" | undefined;
     } | undefined;
     shell?: {
         enabled?: boolean | undefined;

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DEFAULT_QQ_MESSAGE_STYLE_PROMPT } from './handlers/agent.js'
 
 const DshQqBridgeConfig = z.object({
   platform: z.enum(['napcat', 'official']).default('napcat'),
@@ -50,6 +51,13 @@ const DshQqBridgeConfig = z.object({
       timeoutMs: z.number().int().positive().default(120_000),
       /** Agent 长时间无响应时回发的消息。 */
       timeoutMessage: z.string().default('agent 无响应，请稍后重试。'),
+      /** 仅 QQ 入站消息使用的回复风格提示,不会影响其它 DSH 会话。 */
+      qqMessageStyle: z
+        .object({
+          enabled: z.boolean().default(true),
+          prompt: z.string().default(DEFAULT_QQ_MESSAGE_STYLE_PROMPT),
+        })
+        .default({}),
     })
     .default({}),
   shell: z
