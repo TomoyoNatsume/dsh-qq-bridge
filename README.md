@@ -23,6 +23,7 @@
 <h2><span style="color:#2563eb;">把任务丢给鲸鱼娘就转头刷手机忘记盯进度？</span></h2>
 
 <strong>把 DSH 绑定到 QQ：出门在外也能发任务，Web 对话完成后立刻提醒刷手机的你。</strong>
+<strong>无需开放外部端口，无需配置公网地址~ 零安全风险~</strong>
 
 <br>
 
