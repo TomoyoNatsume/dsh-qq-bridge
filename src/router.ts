@@ -1,13 +1,13 @@
-import { OnebotMessageEvent } from './onebot/types.js'
+import { MessageTargetId, OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js'
 import { AccessGate } from './security.js'
 
 /**
  * handler 上下文:暴露来源信息与便捷回发能力。
  */
 export interface HandlerContext {
-  userId: number
+  userId: MessageTargetId
   scope: 'private' | 'group'
-  groupId?: number
+  groupId?: MessageTargetId
   /** 已经剥离指令前缀后的有效载荷 */
   payload: string
   /** 回发到来源会话 */
@@ -21,7 +21,12 @@ export interface Handler {
   run(ctx: HandlerContext): Promise<void>
 }
 
-export type OutboundSender = (scope: 'private' | 'group', targetId: number, text: string) => Promise<void>
+export type OutboundSender = (
+  scope: 'private' | 'group',
+  targetId: MessageTargetId,
+  text: string,
+  replyTarget?: PlatformReplyTarget,
+) => Promise<void>
 
 /**
  * C 骨架:消息分发器。注册 handler,按前缀 + 匹配路由。
@@ -56,7 +61,7 @@ export class MessageRouter {
     const targetId = scope === 'private' ? evt.user_id : evt.group_id!
     const respond = async (text: string): Promise<void> => {
       try {
-        await this.outbound(scope, targetId, text)
+        await this.outbound(scope, targetId, text, evt.reply_target)
       } catch (err) {
         console.warn(
           `[dsh-qq-bridge] failed to send ${scope} message to ${targetId}: ${

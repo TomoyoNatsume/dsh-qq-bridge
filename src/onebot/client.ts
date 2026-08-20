@@ -1,4 +1,4 @@
-import { OnebotActionResponse, OnebotMessageEvent } from './types.js'
+import { MessageTargetId, OnebotActionResponse, OnebotMessageEvent, PlatformReplyTarget } from './types.js'
 import { WebSocket, RawData } from 'ws'
 
 /**
@@ -179,13 +179,21 @@ export class OnebotClient {
     if (frame.echo !== undefined) return
   }
 
-  async sendPrivate(userId: number, message: string): Promise<OnebotActionResponse> {
+  async sendPrivate(
+    userId: MessageTargetId,
+    message: string,
+    _replyTarget?: PlatformReplyTarget,
+  ): Promise<OnebotActionResponse> {
     const frame = { action: 'send_private_msg', params: { user_id: userId, message }, echo: `p_${Date.now()}` }
     await this.flush(frame)
     return { status: 'ok', retcode: 0, data: null }
   }
 
-  async sendGroup(groupId: number, message: string): Promise<OnebotActionResponse> {
+  async sendGroup(
+    groupId: MessageTargetId,
+    message: string,
+    _replyTarget?: PlatformReplyTarget,
+  ): Promise<OnebotActionResponse> {
     const frame = { action: 'send_group_msg', params: { group_id: groupId, message }, echo: `g_${Date.now()}` }
     await this.flush(frame)
     return { status: 'ok', retcode: 0, data: null }

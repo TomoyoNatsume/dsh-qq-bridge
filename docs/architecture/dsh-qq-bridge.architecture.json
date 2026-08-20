@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-qq-bridge 运行时架构",
+    "output": "dsh-qq-bridge-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/TomoyoNatsume/dsh-qq-bridge.git",
+      "revision": "008a0d1e424910d56c622440a251ff7a31bd1896"
+    },
+    "views": [
+      {
+        "id": "mainPath",
+        "label": "主消息路径",
+        "focus": ["qqUser", "napcat", "onebotWs", "pluginApply", "accessGate", "router", "agentHandler", "dshExecutor", "dshAgent"],
+        "note": "从 QQ 指令进入 OneBot WS，到 DSH live agent 返回文本。"
+      },
+      {
+        "id": "singleAccount",
+        "label": "单号模式",
+        "focus": ["napcatLog", "selfLogInput", "router", "agentHandler"],
+        "note": "tail NapCat 日志，把 self-sent 行转换成内部 private message。"
+      },
+      {
+        "id": "setupFlow",
+        "label": "安装向导",
+        "focus": ["setupCli", "napcat", "onebotWs", "profileFiles", "pluginApply"],
+        "note": "setup 配置 NapCat OneBot、DSH profile 和默认权限。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "qqUser",
+      "type": "external",
+      "label": "QQ 用户",
+      "sublabel": "发送 /dsh 指令",
+      "pos": [40, 290],
+      "size": [130, 64],
+      "sources": [{ "path": "README.md", "line": 7, "label": "验证入口" }]
+    },
+    {
+      "id": "napcat",
+      "type": "external",
+      "label": "NapCat",
+      "sublabel": "QQ 登录与收发",
+      "tag": "OneBot v11",
+      "pos": [230, 290],
+      "size": [140, 64],
+      "sources": [{ "path": "README.md", "line": 55, "label": "OneBot 配置" }]
+    },
+    {
+      "id": "onebotWs",
+      "type": "messagebus",
+      "label": "OneBot WS",
+      "sublabel": "ws://127.0.0.1:3001",
+      "pos": [430, 290],
+      "size": [150, 64],
+      "sources": [{ "path": "src/onebot/client.ts", "line": 24, "label": "WsTransport" }]
+    },
+    {
+      "id": "pluginApply",
+      "type": "backend",
+      "label": "Cordis 插件入口",
+      "sublabel": "apply(ctx, config)",
+      "pos": [650, 290],
+      "size": [150, 64],
+      "sources": [{ "path": "src/plugin.ts", "line": 42, "label": "插件挂载" }]
+    },
+    {
+      "id": "accessGate",
+      "type": "security",
+      "label": "AccessGate",
+      "sublabel": "白名单 + 前缀",
+      "pos": [850, 180],
+      "size": [140, 64],
+      "sources": [
+        { "path": "src/security.ts", "line": 20, "label": "allow" },
+        { "path": "src/security.ts", "line": 34, "label": "stripPrefix" }
+      ]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "MessageRouter",
+      "sublabel": "handler 分发",
+      "pos": [850, 290],
+      "size": [140, 64],
+      "sources": [{ "path": "src/router.ts", "line": 26, "label": "route" }]
+    },
+    {
+      "id": "agentHandler",
+      "type": "backend",
+      "label": "AgentRpcHandler",
+      "sublabel": "ack / timeout / split",
+      "pos": [850, 405],
+      "size": [140, 64],
+      "sources": [{ "path": "src/handlers/agent.ts", "line": 51, "label": "agent handler" }]
+    },
+    {
+      "id": "dshExecutor",
+      "type": "backend",
+      "label": "DshAgentExecutor",
+      "sublabel": "每 QQ 会话常驻",
+      "pos": [1050, 405],
+      "size": [150, 64],
+      "sources": [{ "path": "src/handlers/dsh-executor.ts", "line": 80, "label": "session executor" }]
+    },
+    {
+      "id": "dshAgent",
+      "type": "backend",
+      "label": "DSH live agent",
+      "sublabel": "agentLoop / sessionQuery",
+      "pos": [1050, 290],
+      "size": [150, 64],
+      "sources": [{ "path": "src/plugin.ts", "line": 138, "label": "wireDsh" }]
+    },
+    {
+      "id": "napcatLog",
+      "type": "database",
+      "label": "NapCat 日志",
+      "sublabel": "napcat_<QQ>.log",
+      "pos": [430, 520],
+      "size": [150, 64],
+      "sources": [{ "path": "src/inputs/napcat-log.ts", "line": 14, "label": "日志格式" }]
+    },
+    {
+      "id": "selfLogInput",
+      "type": "backend",
+      "label": "SelfLogInput",
+      "sublabel": "单号模式输入",
+      "pos": [650, 520],
+      "size": [150, 64],
+      "sources": [{ "path": "src/inputs/napcat-log.ts", "line": 25, "label": "tailer" }]
+    },
+    {
+      "id": "setupCli",
+      "type": "backend",
+      "label": "setup CLI",
+      "sublabel": "配置向导",
+      "pos": [230, 90],
+      "size": [140, 64],
+      "sources": [{ "path": "src/cli/setup.ts", "line": 37, "label": "runSetup" }]
+    },
+    {
+      "id": "profileFiles",
+      "type": "database",
+      "label": "DSH 配置文件",
+      "sublabel": "cordis.patch.yml / settings.yaml",
+      "pos": [650, 90],
+      "size": [170, 64],
+      "sources": [
+        { "path": "src/cli/setup.ts", "line": 170, "label": "profile" },
+        { "path": "src/cli/setup.ts", "line": 194, "label": "settings" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "QQ / NapCat 侧",
+      "wraps": ["qqUser", "napcat", "onebotWs", "napcatLog"]
+    },
+    {
+      "kind": "region",
+      "label": "DSH Host 内插件",
+      "wraps": ["pluginApply", "accessGate", "router", "agentHandler", "dshExecutor", "dshAgent", "selfLogInput"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "sendCommand",
+      "from": "qqUser",
+      "to": "napcat",
+      "label": "私聊 /dsh ...",
+      "variant": "emphasis",
+      "labelDy": 56
+    },
+    {
+      "id": "wsEvent",
+      "from": "napcat",
+      "to": "onebotWs",
+      "label": "message event",
+      "labelDy": 49
+    },
+    {
+      "id": "clientConnect",
+      "from": "onebotWs",
+      "to": "pluginApply",
+      "label": "client.onMessage",
+      "labelDy": 63
+    },
+    {
+      "id": "applyToGate",
+      "from": "pluginApply",
+      "to": "accessGate",
+      "label": "解析 config",
+      "labelAt": [830, 258]
+    },
+    {
+      "id": "gateToRouter",
+      "from": "accessGate",
+      "to": "router",
+      "label": "allow + strip prefix",
+      "variant": "security",
+      "labelDy": 24
+    },
+    {
+      "id": "routerToHandler",
+      "from": "router",
+      "to": "agentHandler",
+      "label": "payload",
+      "labelDy": 24
+    },
+    {
+      "id": "handlerToExecutor",
+      "from": "agentHandler",
+      "to": "dshExecutor",
+      "label": "run(sessionKey)",
+      "labelDy": 56
+    },
+    {
+      "id": "executorToAgent",
+      "from": "dshExecutor",
+      "to": "dshAgent",
+      "label": "followup + whenIdle",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [1040, 385]
+    },
+    {
+      "id": "readAssistant",
+      "from": "dshAgent",
+      "to": "dshExecutor",
+      "label": "assistant/message",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [[1240, 322], [1240, 437]],
+      "labelAt": [1240, 375]
+    },
+    {
+      "id": "sendBack",
+      "from": "agentHandler",
+      "to": "onebotWs",
+      "label": "send_private/group_msg",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[920, 620], [1320, 620], [1320, 70], [505, 70]],
+      "labelAt": [1160, 630]
+    },
+    {
+      "id": "selfLogTail",
+      "from": "napcatLog",
+      "to": "selfLogInput",
+      "label": "poll + parse"
+    },
+    {
+      "id": "selfLogRoute",
+      "from": "selfLogInput",
+      "to": "router",
+      "label": "synthetic private event",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [[725, 390], [820, 390], [820, 322]],
+      "labelAt": [780, 380]
+    },
+    {
+      "id": "setupNapcat",
+      "from": "setupCli",
+      "to": "napcat",
+      "label": "start / restart",
+      "labelDy": 24
+    },
+    {
+      "id": "setupWs",
+      "from": "setupCli",
+      "to": "onebotWs",
+      "label": "token + 3001"
+    },
+    {
+      "id": "profileLoadsPlugin",
+      "from": "profileFiles",
+      "to": "pluginApply",
+      "label": "Cordis insert",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [755, 230]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主路径",
+      "items": [
+        "QQ 指令经 NapCat 转成 OneBot message event。",
+        "插件只处理白名单用户且匹配 commandPrefix 的消息。",
+        "默认所有有效 payload 交给 AgentRpcHandler。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "DSH 会话",
+      "items": [
+        "同一 QQ 私聊或群聊 sessionKey 复用常驻 live agent。",
+        "并发消息按 sessionKey 串行，避免同一会话被同时驱动。",
+        "回复从 live session 事件中提取 assistant/message 文本。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "配置与辅助输入",
+      "items": [
+        "setup CLI 配置 NapCat OneBot、DSH profile 和默认权限。",
+        "单号模式通过 tail NapCat 日志补齐 self-sent 消息入口。",
+        "shell handler 目前是显式关闭的占位路径。"
+      ]
+    }
+  ]
+}

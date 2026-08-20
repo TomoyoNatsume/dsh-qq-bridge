@@ -1,9 +1,11 @@
-import { OnebotMessageEvent, OnebotMessageType } from './onebot/types.js';
+import { MessageTargetId, OnebotMessageEvent, OnebotMessageType } from './onebot/types.js';
 export interface AccessOptions {
-    /** 拥有者 QQ(总是放行) */
-    adminQq: number;
-    /** 额外允许的 user_id */
-    allowlist: number[];
+    /** 拥有者 QQ(NapCat 模式兼容字段)。 */
+    adminQq?: number;
+    /** 拥有者平台身份:官方机器人模式为 adminOpenId,NapCat 模式可省略并回退 adminQq。 */
+    adminId?: MessageTargetId;
+    /** 额外允许的 user_id/openid */
+    allowlist: MessageTargetId[];
     /** 指令前缀,如 '/dsh' */
     commandPrefix: string;
     /** whitelist: 只允许 admin+allowlist;open: 任何人都能触发(仅测试用) */

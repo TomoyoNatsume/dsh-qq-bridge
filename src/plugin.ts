@@ -6,9 +6,11 @@ import { AgentRpcHandler } from './handlers/agent.js'
 import { DshAgentExecutor, DshRenderedAgent } from './handlers/dsh-executor.js'
 import { ShellHandler } from './handlers/shell.js'
 import { DshQqBridgeConfig } from './config.js'
-import { OnebotMessageEvent } from './onebot/types.js'
+import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js'
 import { NapcatSelfLogInput } from './inputs/napcat-log.js'
 import { homedir } from 'node:os'
+import { TencentOfficialBotClient } from './official/client.js'
+import type { MessageTargetId } from './onebot/types.js'
 
 /** DSH live agent 最小画面。 */
 interface DshAgent {
@@ -36,7 +38,21 @@ interface DshCtx {
     readSurface(sessionId: string): Promise<{ events: readonly unknown[] }>
   }
   /** cordis 事件订阅(session/event 广播)。 */
-  on?(event: string, cb: (subject: { id?: string }, event: unknown) => void): () => void
+  on?(event: string, cb: (subject: DshSessionSubject, event: unknown) => void): () => void
+}
+
+interface DshSessionSubject {
+  id?: string
+  header?: { origin?: string }
+  events?: readonly unknown[]
+}
+
+interface BridgeChatClient {
+  connect(): Promise<void>
+  onMessage(cb: (evt: OnebotMessageEvent) => void): () => void
+  sendPrivate(userId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>
+  sendGroup(groupId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>
+  disconnect(): Promise<void>
 }
 
 /**
@@ -49,20 +65,30 @@ export const inject = ['agentLoop', 'agentPresets', 'sessionQuery']
 
 export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<() => Promise<void>> {
   const cfg = DshQqBridgeConfig.parse(options)
+  assertPlatformConfig(cfg)
+  const officialMode = cfg.platform === 'official'
+  const adminTarget: MessageTargetId = officialMode ? cfg.official.adminOpenId : cfg.access.adminQq
 
   const gate = new AccessGate({
     adminQq: cfg.access.adminQq,
-    allowlist: cfg.access.allowlist,
+    adminId: adminTarget,
+    allowlist: officialMode ? cfg.official.allowlistOpenIds : cfg.access.allowlist,
     commandPrefix: cfg.access.commandPrefix,
     mode: cfg.access.mode,
   })
 
-  const transport: Transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token)
-  const client = new OnebotClient(transport)
+  const client = createBridgeClient(cfg)
+  const notifyAgentReply = agentReplyNotificationsEnabled(cfg)
+  if (officialMode && cfg.notifications.agentReply.enabled === undefined) {
+    console.info('[dsh-qq-bridge] official QQ agent reply notifications are disabled by default; set notifications.agentReply.enabled=true to use wakeup messages')
+  }
+  const replyNotifier = notifyAgentReply
+    ? createAgentReplyNotifier(ctx, client, adminTarget)
+    : () => {}
 
-  const outbound: OutboundSender = async (scope, targetId, text) => {
-    if (scope === 'private') await client.sendPrivate(targetId, text)
-    else await client.sendGroup(targetId, text)
+  const outbound: OutboundSender = async (scope, targetId, text, replyTarget) => {
+    if (scope === 'private') await client.sendPrivate(targetId, text, replyTarget)
+    else await client.sendGroup(targetId, text, replyTarget)
   }
   const router = new MessageRouter(gate, outbound)
 
@@ -89,11 +115,13 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     void router.route(evt)
   })
   client.connect().catch((err) => {
-    console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err))
+    console.warn('[dsh-qq-bridge] ' + (
+      officialMode ? buildOfficialConnectGuidance(cfg, err) : buildConnectGuidance(cfg, err)
+    ))
   })
 
   let selfLogInput: NapcatSelfLogInput | undefined
-  if (cfg.selfLogInput.enabled) {
+  if (!officialMode && cfg.selfLogInput.enabled) {
     const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`
     selfLogInput = new NapcatSelfLogInput({
       logPath,
@@ -111,6 +139,7 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     unregisterAgent()
     unregisterShell()
     unsubMessages()
+    replyNotifier()
     selfLogInput?.stop()
     await executor.disposeAll() // 释放全部常驻 agent
     await client.disconnect()
@@ -118,6 +147,11 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
 }
 
 export default { name, inject, apply }
+
+/** 判断是否启用 agent 完成后的管理员主动提醒。 */
+export function agentReplyNotificationsEnabled(cfg: DshQqBridgeConfig): boolean {
+  return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official'
+}
 
 function makeDshExecutor(ctx: DshCtx, agentCfg?: { preset?: string; provider?: string; model?: string }) {
   const handles = wireDsh(ctx, agentCfg)
@@ -281,6 +315,103 @@ function workdir(): string {
   } catch {
     return '.'
   }
+}
+
+function createBridgeClient(cfg: DshQqBridgeConfig): BridgeChatClient {
+  if (cfg.platform === 'official') {
+    return new TencentOfficialBotClient({
+      appId: cfg.official.appId,
+      appSecret: cfg.official.appSecret,
+      sandbox: cfg.official.sandbox,
+    })
+  }
+  const transport: Transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token)
+  return new OnebotClient(transport)
+}
+
+function assertPlatformConfig(cfg: DshQqBridgeConfig): void {
+  if (cfg.platform !== 'official') return
+  if (!cfg.official.appId.trim()) throw new Error('dsh-qq-bridge: official.appId is required when platform=official')
+  if (!cfg.official.appSecret.trim()) throw new Error('dsh-qq-bridge: official.appSecret is required when platform=official')
+  if (cfg.access.mode === 'whitelist' && !cfg.official.adminOpenId.trim()) {
+    throw new Error('dsh-qq-bridge: official.adminOpenId is required in whitelist mode')
+  }
+}
+
+export function createAgentReplyNotifier(
+  ctx: Pick<DshCtx, 'on'>,
+  client: Pick<BridgeChatClient, 'sendPrivate'>,
+  adminTarget: MessageTargetId,
+): () => void {
+  if (!ctx.on || adminTarget === '' || adminTarget === 0) return () => {}
+  const sent = new Set<string>()
+  return ctx.on('session/event', (session, event) => {
+    if (!isCompletedTurnEnd(event)) return
+    if (session.header?.origin === 'subagent') return
+    const sessionId = String(session.id ?? '')
+    if (isQqAgentSessionId(sessionId)) return
+    const key = `${sessionId}:${event.data.turn}`
+    if (sent.has(key)) return
+    const title = findSessionTitle(session.events ?? [])
+    sendAgentReplyNotification(client, adminTarget, sent, key, `主人，您收到一条Agent回复，来自[${title}]`)
+  })
+}
+
+/** 监听 DSH 会话完成事件,向管理员 QQ 发送一条轻量提醒。 */
+export function registerAgentReplyNotifier(
+  ctx: Pick<DshCtx, 'on'>,
+  client: Pick<BridgeChatClient, 'sendPrivate'>,
+  adminTarget: MessageTargetId,
+): () => void {
+  return createAgentReplyNotifier(ctx, client, adminTarget)
+}
+
+function sendAgentReplyNotification(
+  client: Pick<BridgeChatClient, 'sendPrivate'>,
+  adminTarget: MessageTargetId,
+  sent: Set<string>,
+  key: string,
+  message: string,
+): void {
+  if (sent.has(key)) return
+  sent.add(key)
+  void client.sendPrivate(adminTarget, message).catch((err: unknown) => {
+    console.warn(`[dsh-qq-bridge] agent reply notification failed: ${err instanceof Error ? err.message : String(err)}`)
+  })
+}
+
+function isQqAgentSessionId(sessionId: string): boolean {
+  return sessionId.startsWith('qq-')
+}
+
+function isCompletedTurnEnd(event: unknown): event is { type: 'turn/end'; data: { turn: number; reason: { kind: 'completed' } } } {
+  const evt = event as { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown } } } | null
+  return evt?.type === 'turn/end'
+    && typeof evt.data?.turn === 'number'
+    && evt.data.reason?.kind === 'completed'
+}
+
+export function findSessionTitle(events: readonly unknown[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i] as { type?: unknown; data?: { title?: unknown } } | null
+    if (event?.type === 'session/title' && typeof event.data?.title === 'string') return event.data.title
+  }
+  return ''
+}
+
+/** 构建官方机器人连接失败时的引导文案。 */
+export function buildOfficialConnectGuidance(cfg: DshQqBridgeConfig, err: unknown): string {
+  const reason = err instanceof Error ? err.message : String(err)
+  return [
+    `[dsh-qq-bridge] 无法连接腾讯官方 QQ 机器人 WebSocket: appId=${cfg.official.appId || '(empty)'}`,
+    `原因: ${reason}`,
+    ``,
+    `请检查:`,
+    `1. QQ 开放平台机器人 AppID/AppSecret 是否正确。`,
+    `2. 机器人是否已加入沙箱成员,或已上线到当前会话场景。`,
+    `3. 当前服务器出口 IP 是否满足开放平台白名单要求。`,
+    `4. whitelist 模式下 official.adminOpenId 是否来自该机器人收到的真实消息事件。`,
+  ].join('\n')
 }
 
 /** 构建连接失败时的引导文案,指向「给 Agent 的 NapCat 安装向导」。 */

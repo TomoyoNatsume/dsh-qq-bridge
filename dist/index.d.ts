@@ -4,6 +4,8 @@
 export { OnebotClient, WsTransport } from './onebot/client.js';
 export type { Transport } from './onebot/client.js';
 export type { OnebotMessageEvent, OnebotMessageType } from './onebot/types.js';
+export { TencentOfficialBotClient, toBridgeMessageEvent } from './official/client.js';
+export type { TencentOfficialBotOptions } from './official/client.js';
 export { MessageRouter } from './router.js';
 export type { Handler, HandlerContext } from './router.js';
 export { AccessGate } from './security.js';
@@ -17,4 +19,5 @@ export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.
 export { DshQqBridgeConfig } from './config.js';
 export type * from './config.js';
 export { buildConnectGuidance } from './plugin.js';
+export { agentReplyNotificationsEnabled, buildOfficialConnectGuidance, createAgentReplyNotifier, findSessionTitle, registerAgentReplyNotifier, } from './plugin.js';
 export { default } from './plugin.js';

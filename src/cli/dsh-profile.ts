@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -12,6 +11,18 @@ export interface BridgeProfileConfig {
   model: string
   selfLogEnabled: boolean
   selfLogPath?: string
+}
+
+export interface OfficialBridgeProfileConfig {
+  pluginName: string
+  appId: string
+  appSecret: string
+  adminOpenId: string
+  allowlistOpenIds: readonly string[]
+  sandbox: boolean
+  commandPrefix: string
+  provider: string
+  model: string
 }
 
 export interface ProfileUpdateResult {
@@ -42,6 +53,7 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     `    - id: ${BRIDGE_ID}`,
     `      name: ${cfg.pluginName}`,
     '      config:',
+    '        platform: napcat',
     '        napcat:',
     `          wsUrl: ${cfg.wsUrl}`,
     `          token: ${yamlQuote(cfg.token)}`,
@@ -62,6 +74,42 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     '        shell:',
     '          enabled: false',
     ...selfLog,
+  ].join('\n')
+}
+
+export function buildOfficialBridgeInsertItem(cfg: OfficialBridgeProfileConfig): string {
+  return [
+    `    - id: ${BRIDGE_ID}`,
+    `      name: ${cfg.pluginName}`,
+    '      config:',
+    '        platform: official',
+    '        official:',
+    `          appId: ${yamlQuote(cfg.appId)}`,
+    `          appSecret: ${yamlQuote(cfg.appSecret)}`,
+    `          adminOpenId: ${yamlQuote(cfg.adminOpenId)}`,
+    `          allowlistOpenIds: ${yamlStringArray(cfg.allowlistOpenIds)}`,
+    `          sandbox: ${cfg.sandbox ? 'true' : 'false'}`,
+    '        access:',
+    '          adminQq: 0',
+    '          allowlist: []',
+    `          commandPrefix: ${cfg.commandPrefix}`,
+    '          mode: whitelist',
+    '        notifications:',
+    '          agentReply:',
+    '            enabled: false',
+    '        agent:',
+    `          provider: ${cfg.provider}`,
+    `          model: ${cfg.model}`,
+    '          preset: standard',
+    '          streamReasoning: false',
+    '          maxMessageLength: 4500',
+    '          ackMessage: 收到，正在处理...',
+    '          timeoutMs: 120000',
+    '          timeoutMessage: agent 无响应，请稍后重试。',
+    '        shell:',
+    '          enabled: false',
+    '        selfLogInput:',
+    '          enabled: false',
   ].join('\n')
 }
 
@@ -172,13 +220,13 @@ export function updateProfilePatch(content: string, item: string, itemId = BRIDG
   }
 }
 
-export async function writeProfilePatchWithBackup(path: string, nextContent: string): Promise<string> {
+export async function writeProfilePatchWithBackup(path: string, nextContent: string, backupPath: string): Promise<string> {
   const previous = await readFile(path, 'utf8').catch(() => '[]\n')
   await mkdir(dirname(path), { recursive: true })
-  const backup = `${path}.bak.${timestamp()}`
-  await writeFile(backup, previous, 'utf8')
+  await mkdir(dirname(backupPath), { recursive: true })
   await writeFile(path, nextContent, 'utf8')
-  return backup
+  await writeFile(backupPath, previous, 'utf8')
+  return backupPath
 }
 
 function findTopLevelInsertRanges(lines: string[]): Array<{ start: number; end: number }> {
@@ -263,22 +311,12 @@ function trimTrailingBlankLines(lines: string[]): string[] {
   return next
 }
 
-function timestamp(): string {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return [
-    now.getFullYear(),
-    pad(now.getMonth() + 1),
-    pad(now.getDate()),
-    pad(now.getHours()),
-    pad(now.getMinutes()),
-    pad(now.getSeconds()),
-    randomBytes(2).toString('hex'),
-  ].join('')
-}
-
 function yamlQuote(value: string): string {
   return JSON.stringify(value)
+}
+
+function yamlStringArray(values: readonly string[]): string {
+  return `[${values.map((value) => yamlQuote(value)).join(', ')}]`
 }
 
 function escapeRegExp(value: string): string {

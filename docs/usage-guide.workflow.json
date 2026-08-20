@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "dsh-qq-bridge 使用导图",
+    "output": "docs/usage-guide.html",
+    "quality_profile": "showcase",
+    "viewBox": [1500, 880],
+    "views": [
+      {
+        "id": "napcat-start",
+        "label": "NapCat 默认路径",
+        "focus": ["prepare", "install_plugin", "run_setup", "napcat_path", "permission_choice", "restart_web", "verify_qq"],
+        "note": "新用户优先走 NapCat / OneBot，按 setup 提示扫码、写入 profile、重启验证。"
+      },
+      {
+        "id": "official-bot-start",
+        "label": "官方 QQ Bot 路径",
+        "focus": ["prepare", "install_plugin", "run_setup", "official_path", "permission_choice", "restart_web", "verify_qq"],
+        "note": "先在 QQ 开放平台创建机器人，再用 setup 配对写入 adminOpenId。"
+      },
+      {
+        "id": "after-setup",
+        "label": "配置生效",
+        "focus": ["permission_choice", "restart_web", "verify_qq"],
+        "note": "setup 或修改 cordis.patch.yml 后，重启 dsh web 才会加载新配置。"
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "prepare_lane", "label": "准备环境" },
+    { "id": "install_lane", "label": "安装插件" },
+    { "id": "setup_lane", "label": "运行 setup" },
+    { "id": "official_lane", "label": "腾讯官方 QQ Bot" },
+    { "id": "napcat_lane", "label": "NapCat / OneBot" },
+    { "id": "finish_lane", "label": "启动与验证" }
+  ],
+  "phases": [
+    { "id": "phase_prepare", "label": "准备", "fromCol": 0, "toCol": 0 },
+    { "id": "phase_install", "label": "安装", "fromCol": 1, "toCol": 1 },
+    { "id": "phase_setup", "label": "向导配置", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "phase_finish", "label": "生效验证", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "access_group", "label": "setup 中选择一种 QQ 接入方式", "lane": "setup_lane", "fromCol": 2, "toCol": 3, "variant": "emphasis" }
+  ],
+  "mainPath": ["prepare", "install_plugin", "run_setup", "napcat_path", "permission_choice", "restart_web", "verify_qq"],
+  "nodes": [
+    {
+      "id": "prepare",
+      "lane": "prepare_lane",
+      "col": 0,
+      "type": "external",
+      "label": "准备",
+      "sublabel": "Node / DSH",
+      "width": 86
+    },
+    {
+      "id": "install_plugin",
+      "lane": "install_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "安装插件",
+      "sublabel": "pnpm dsh plugin add",
+      "width": 112
+    },
+    {
+      "id": "run_setup",
+      "lane": "setup_lane",
+      "col": 2,
+      "type": "backend",
+      "label": "运行 setup",
+      "sublabel": "dsh-qq-bridge setup",
+      "width": 114
+    },
+    {
+      "id": "napcat_path",
+      "lane": "napcat_lane",
+      "col": 3,
+      "type": "messagebus",
+      "label": "NapCat 路径",
+      "sublabel": "扫码 + OneBot",
+      "tag": "默认",
+      "width": 106
+    },
+    {
+      "id": "official_path",
+      "lane": "official_lane",
+      "col": 1,
+      "type": "cloud",
+      "label": "官方 Bot 路径",
+      "sublabel": "AppID + 配对",
+      "width": 106
+    },
+    {
+      "id": "permission_choice",
+      "lane": "setup_lane",
+      "col": 4,
+      "type": "security",
+      "label": "权限选择",
+      "sublabel": "安全 / 省心 / 保持",
+      "width": 106
+    },
+    {
+      "id": "restart_web",
+      "lane": "finish_lane",
+      "col": 4,
+      "type": "backend",
+      "label": "重启 dsh web",
+      "sublabel": "加载新配置",
+      "width": 106
+    },
+    {
+      "id": "verify_qq",
+      "lane": "finish_lane",
+      "col": 5,
+      "type": "frontend",
+      "label": "QQ 验证",
+      "sublabel": "/dsh ping",
+      "width": 86
+    }
+  ],
+  "edges": [
+    { "from": "prepare", "to": "install_plugin", "variant": "emphasis" },
+    { "from": "install_plugin", "to": "run_setup", "variant": "emphasis" },
+    { "from": "run_setup", "to": "napcat_path", "variant": "emphasis", "role": "main", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+    { "from": "run_setup", "to": "official_path", "variant": "dashed", "role": "branch" },
+    { "from": "napcat_path", "to": "permission_choice" },
+    { "from": "permission_choice", "to": "restart_web" },
+    { "from": "restart_web", "to": "verify_qq", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "默认推荐",
+      "items": [
+        "优先选择 NapCat / OneBot 路径",
+        "先用 /dsh ping 验证链路",
+        "QQ 发起的会话只保留实际回复"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "官方 QQ Bot",
+      "items": [
+        "先到 https://q.qq.com/qqbot/dashboard/ 创建机器人",
+        "setup 用一次性 /dsh pair <code> 写入 adminOpenId",
+        "官方主动提醒默认关闭，避免触发限额"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "配置生效",
+      "items": [
+        "setup 或修改 cordis.patch.yml 后需要重启 dsh web",
+        "源码改动后才需要 npm run build",
+        "固定备份保存在插件目录 backups/"
+      ]
+    }
+  ]
+}

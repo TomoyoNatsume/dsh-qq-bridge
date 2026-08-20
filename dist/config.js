@@ -1,11 +1,26 @@
 import { z } from 'zod';
 const DshQqBridgeConfig = z.object({
+    platform: z.enum(['napcat', 'official']).default('napcat'),
     napcat: z.object({
-        wsUrl: z.string().url(),
+        wsUrl: z.string().url().default('ws://127.0.0.1:3001'),
         token: z.string().optional(),
         /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
         guideDoc: z.string().optional().default('docs/agent-napcat-guide.md'),
-    }),
+    }).default({}),
+    official: z
+        .object({
+        /** 腾讯 QQ 机器人开放平台 AppID。 */
+        appId: z.string().default(''),
+        /** 腾讯 QQ 机器人开放平台 AppSecret。 */
+        appSecret: z.string().default(''),
+        /** 管理员在该机器人下的 openid;用户需先给机器人发消息才能获得。 */
+        adminOpenId: z.string().default(''),
+        /** 官方机器人模式下额外允许的用户 openid。 */
+        allowlistOpenIds: z.array(z.string()).default([]),
+        /** 是否使用官方沙箱 API。 */
+        sandbox: z.boolean().default(false),
+    })
+        .default({}),
     access: z
         .object({
         adminQq: z.number(),
@@ -39,6 +54,16 @@ const DshQqBridgeConfig = z.object({
     shell: z
         .object({
         enabled: z.boolean().default(false),
+    })
+        .default({}),
+    notifications: z
+        .object({
+        agentReply: z
+            .object({
+            /** Agent 完成后是否主动向管理员发送提醒。不设置时 NapCat 默认开,官方机器人默认关。 */
+            enabled: z.boolean().optional(),
+        })
+            .default({}),
     })
         .default({}),
     selfLogInput: z

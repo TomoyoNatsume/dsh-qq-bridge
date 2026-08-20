@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -45,13 +44,13 @@ export function updatePermissionDefaultPreset(content: string, preset = 'danger-
   }
 }
 
-export async function writeSettingsWithBackup(path: string, nextContent: string): Promise<string> {
+export async function writeSettingsWithBackup(path: string, nextContent: string, backupPath: string): Promise<string> {
   const previous = await readFile(path, 'utf8').catch(() => '')
   await mkdir(dirname(path), { recursive: true })
-  const backup = `${path}.bak.${timestamp()}`
-  await writeFile(backup, previous, 'utf8')
+  await mkdir(dirname(backupPath), { recursive: true })
   await writeFile(path, nextContent, 'utf8')
-  return backup
+  await writeFile(backupPath, previous, 'utf8')
+  return backupPath
 }
 
 function findTopLevelKey(lines: string[], key: string): number {
@@ -91,20 +90,6 @@ function trimTrailingBlankLines(lines: string[]): string[] {
   const next = [...lines]
   while (next.length > 0 && next[next.length - 1] === '') next.pop()
   return next
-}
-
-function timestamp(): string {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return [
-    now.getFullYear(),
-    pad(now.getMonth() + 1),
-    pad(now.getDate()),
-    pad(now.getHours()),
-    pad(now.getMinutes()),
-    pad(now.getSeconds()),
-    randomBytes(2).toString('hex'),
-  ].join('')
 }
 
 function escapeRegExp(value: string): string {

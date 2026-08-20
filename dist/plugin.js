@@ -8,6 +8,7 @@ import { ShellHandler } from './handlers/shell.js';
 import { DshQqBridgeConfig } from './config.js';
 import { NapcatSelfLogInput } from './inputs/napcat-log.js';
 import { homedir } from 'node:os';
+import { TencentOfficialBotClient } from './official/client.js';
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
@@ -17,19 +18,29 @@ export const name = 'dsh-qq-bridge';
 export const inject = ['agentLoop', 'agentPresets', 'sessionQuery'];
 export async function apply(ctx, options) {
     const cfg = DshQqBridgeConfig.parse(options);
+    assertPlatformConfig(cfg);
+    const officialMode = cfg.platform === 'official';
+    const adminTarget = officialMode ? cfg.official.adminOpenId : cfg.access.adminQq;
     const gate = new AccessGate({
         adminQq: cfg.access.adminQq,
-        allowlist: cfg.access.allowlist,
+        adminId: adminTarget,
+        allowlist: officialMode ? cfg.official.allowlistOpenIds : cfg.access.allowlist,
         commandPrefix: cfg.access.commandPrefix,
         mode: cfg.access.mode,
     });
-    const transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token);
-    const client = new OnebotClient(transport);
-    const outbound = async (scope, targetId, text) => {
+    const client = createBridgeClient(cfg);
+    const notifyAgentReply = agentReplyNotificationsEnabled(cfg);
+    if (officialMode && cfg.notifications.agentReply.enabled === undefined) {
+        console.info('[dsh-qq-bridge] official QQ agent reply notifications are disabled by default; set notifications.agentReply.enabled=true to use wakeup messages');
+    }
+    const replyNotifier = notifyAgentReply
+        ? createAgentReplyNotifier(ctx, client, adminTarget)
+        : () => { };
+    const outbound = async (scope, targetId, text, replyTarget) => {
         if (scope === 'private')
-            await client.sendPrivate(targetId, text);
+            await client.sendPrivate(targetId, text, replyTarget);
         else
-            await client.sendGroup(targetId, text);
+            await client.sendGroup(targetId, text, replyTarget);
     };
     const router = new MessageRouter(gate, outbound);
     const executor = makeDshExecutor(ctx, cfg.agent);
@@ -51,10 +62,10 @@ export async function apply(ctx, options) {
         void router.route(evt);
     });
     client.connect().catch((err) => {
-        console.warn('[dsh-qq-bridge] ' + buildConnectGuidance(cfg, err));
+        console.warn('[dsh-qq-bridge] ' + (officialMode ? buildOfficialConnectGuidance(cfg, err) : buildConnectGuidance(cfg, err)));
     });
     let selfLogInput;
-    if (cfg.selfLogInput.enabled) {
+    if (!officialMode && cfg.selfLogInput.enabled) {
         const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`;
         selfLogInput = new NapcatSelfLogInput({
             logPath,
@@ -71,12 +82,17 @@ export async function apply(ctx, options) {
         unregisterAgent();
         unregisterShell();
         unsubMessages();
+        replyNotifier();
         selfLogInput?.stop();
         await executor.disposeAll(); // 释放全部常驻 agent
         await client.disconnect();
     };
 }
 export default { name, inject, apply };
+/** 判断是否启用 agent 完成后的管理员主动提醒。 */
+export function agentReplyNotificationsEnabled(cfg) {
+    return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official';
+}
 function makeDshExecutor(ctx, agentCfg) {
     const handles = wireDsh(ctx, agentCfg);
     if (handles)
@@ -242,6 +258,90 @@ function workdir() {
     catch {
         return '.';
     }
+}
+function createBridgeClient(cfg) {
+    if (cfg.platform === 'official') {
+        return new TencentOfficialBotClient({
+            appId: cfg.official.appId,
+            appSecret: cfg.official.appSecret,
+            sandbox: cfg.official.sandbox,
+        });
+    }
+    const transport = new WsTransport(cfg.napcat.wsUrl, cfg.napcat.token);
+    return new OnebotClient(transport);
+}
+function assertPlatformConfig(cfg) {
+    if (cfg.platform !== 'official')
+        return;
+    if (!cfg.official.appId.trim())
+        throw new Error('dsh-qq-bridge: official.appId is required when platform=official');
+    if (!cfg.official.appSecret.trim())
+        throw new Error('dsh-qq-bridge: official.appSecret is required when platform=official');
+    if (cfg.access.mode === 'whitelist' && !cfg.official.adminOpenId.trim()) {
+        throw new Error('dsh-qq-bridge: official.adminOpenId is required in whitelist mode');
+    }
+}
+export function createAgentReplyNotifier(ctx, client, adminTarget) {
+    if (!ctx.on || adminTarget === '' || adminTarget === 0)
+        return () => { };
+    const sent = new Set();
+    return ctx.on('session/event', (session, event) => {
+        if (!isCompletedTurnEnd(event))
+            return;
+        if (session.header?.origin === 'subagent')
+            return;
+        const sessionId = String(session.id ?? '');
+        if (isQqAgentSessionId(sessionId))
+            return;
+        const key = `${sessionId}:${event.data.turn}`;
+        if (sent.has(key))
+            return;
+        const title = findSessionTitle(session.events ?? []);
+        sendAgentReplyNotification(client, adminTarget, sent, key, `主人，您收到一条Agent回复，来自[${title}]`);
+    });
+}
+/** 监听 DSH 会话完成事件,向管理员 QQ 发送一条轻量提醒。 */
+export function registerAgentReplyNotifier(ctx, client, adminTarget) {
+    return createAgentReplyNotifier(ctx, client, adminTarget);
+}
+function sendAgentReplyNotification(client, adminTarget, sent, key, message) {
+    if (sent.has(key))
+        return;
+    sent.add(key);
+    void client.sendPrivate(adminTarget, message).catch((err) => {
+        console.warn(`[dsh-qq-bridge] agent reply notification failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+}
+function isQqAgentSessionId(sessionId) {
+    return sessionId.startsWith('qq-');
+}
+function isCompletedTurnEnd(event) {
+    const evt = event;
+    return evt?.type === 'turn/end'
+        && typeof evt.data?.turn === 'number'
+        && evt.data.reason?.kind === 'completed';
+}
+export function findSessionTitle(events) {
+    for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        if (event?.type === 'session/title' && typeof event.data?.title === 'string')
+            return event.data.title;
+    }
+    return '';
+}
+/** 构建官方机器人连接失败时的引导文案。 */
+export function buildOfficialConnectGuidance(cfg, err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return [
+        `[dsh-qq-bridge] 无法连接腾讯官方 QQ 机器人 WebSocket: appId=${cfg.official.appId || '(empty)'}`,
+        `原因: ${reason}`,
+        ``,
+        `请检查:`,
+        `1. QQ 开放平台机器人 AppID/AppSecret 是否正确。`,
+        `2. 机器人是否已加入沙箱成员,或已上线到当前会话场景。`,
+        `3. 当前服务器出口 IP 是否满足开放平台白名单要求。`,
+        `4. whitelist 模式下 official.adminOpenId 是否来自该机器人收到的真实消息事件。`,
+    ].join('\n');
 }
 /** 构建连接失败时的引导文案,指向「给 Agent 的 NapCat 安装向导」。 */
 export function buildConnectGuidance(cfg, err) {

@@ -1,4 +1,6 @@
 import { DshQqBridgeConfig } from './config.js';
+import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js';
+import type { MessageTargetId } from './onebot/types.js';
 /** DSH live agent 最小画面。 */
 interface DshAgent {
     followup(message: {
@@ -34,9 +36,21 @@ interface DshCtx {
         }>;
     };
     /** cordis 事件订阅(session/event 广播)。 */
-    on?(event: string, cb: (subject: {
-        id?: string;
-    }, event: unknown) => void): () => void;
+    on?(event: string, cb: (subject: DshSessionSubject, event: unknown) => void): () => void;
+}
+interface DshSessionSubject {
+    id?: string;
+    header?: {
+        origin?: string;
+    };
+    events?: readonly unknown[];
+}
+interface BridgeChatClient {
+    connect(): Promise<void>;
+    onMessage(cb: (evt: OnebotMessageEvent) => void): () => void;
+    sendPrivate(userId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>;
+    sendGroup(groupId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>;
+    disconnect(): Promise<void>;
 }
 /**
  * Cordis 插件入口(Host 侧)。
@@ -52,5 +66,13 @@ declare const _default: {
     apply: typeof apply;
 };
 export default _default;
+/** 判断是否启用 agent 完成后的管理员主动提醒。 */
+export declare function agentReplyNotificationsEnabled(cfg: DshQqBridgeConfig): boolean;
+export declare function createAgentReplyNotifier(ctx: Pick<DshCtx, 'on'>, client: Pick<BridgeChatClient, 'sendPrivate'>, adminTarget: MessageTargetId): () => void;
+/** 监听 DSH 会话完成事件,向管理员 QQ 发送一条轻量提醒。 */
+export declare function registerAgentReplyNotifier(ctx: Pick<DshCtx, 'on'>, client: Pick<BridgeChatClient, 'sendPrivate'>, adminTarget: MessageTargetId): () => void;
+export declare function findSessionTitle(events: readonly unknown[]): string;
+/** 构建官方机器人连接失败时的引导文案。 */
+export declare function buildOfficialConnectGuidance(cfg: DshQqBridgeConfig, err: unknown): string;
 /** 构建连接失败时的引导文案,指向「给 Agent 的 NapCat 安装向导」。 */
 export declare function buildConnectGuidance(cfg: DshQqBridgeConfig, err: unknown): string;

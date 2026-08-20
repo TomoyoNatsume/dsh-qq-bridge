@@ -167,12 +167,12 @@ export class OnebotClient {
         if (frame.echo !== undefined)
             return;
     }
-    async sendPrivate(userId, message) {
+    async sendPrivate(userId, message, _replyTarget) {
         const frame = { action: 'send_private_msg', params: { user_id: userId, message }, echo: `p_${Date.now()}` };
         await this.flush(frame);
         return { status: 'ok', retcode: 0, data: null };
     }
-    async sendGroup(groupId, message) {
+    async sendGroup(groupId, message, _replyTarget) {
         const frame = { action: 'send_group_msg', params: { group_id: groupId, message }, echo: `g_${Date.now()}` };
         await this.flush(frame);
         return { status: 'ok', retcode: 0, data: null };

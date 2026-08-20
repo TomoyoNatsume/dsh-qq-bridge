@@ -12,3 +12,5 @@ coverage/
 
 # debug dumps
 .debug-*.json
+
+*.bak

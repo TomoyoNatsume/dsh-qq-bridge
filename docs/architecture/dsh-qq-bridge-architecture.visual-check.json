@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "visual-check",
+  "status": "skipped",
+  "visualReview": "pending",
+  "artifact": {
+    "path": "/home/liangyihao/temp/dsh-qq-bridge/docs/architecture/dsh-qq-bridge-architecture.html",
+    "sha256": "349286fef65668ee9737eba20be88920a6ef1341541a1254918322093d816a59",
+    "bytes": 652022
+  },
+  "state": {
+    "detail": "read",
+    "motion": "still"
+  },
+  "chrome": {
+    "status": "unavailable",
+    "executable": null
+  },
+  "containment": {
+    "status": "skipped",
+    "viewports": []
+  },
+  "captures": {
+    "status": "skipped",
+    "screenshots": [],
+    "contactSheet": null
+  },
+  "sidecars": {
+    "receipt": "dsh-qq-bridge-architecture.visual-check.json",
+    "contactSheet": "dsh-qq-bridge-architecture.visual-check.html"
+  },
+  "error": "Chrome or Chromium is unavailable. Set ARCHIFY_CHROME to its executable path."
+}

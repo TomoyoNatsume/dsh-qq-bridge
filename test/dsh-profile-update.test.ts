@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { buildBridgeInsertItem, updateProfilePatch, updateSetupProfilePatch } from '../src/cli/dsh-profile.js'
-import { updatePermissionDefaultPreset } from '../src/cli/dsh-settings.js'
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  buildBridgeInsertItem,
+  buildOfficialBridgeInsertItem,
+  updateProfilePatch,
+  updateSetupProfilePatch,
+  writeProfilePatchWithBackup,
+} from '../src/cli/dsh-profile.js'
+import { updatePermissionDefaultPreset, writeSettingsWithBackup } from '../src/cli/dsh-settings.js'
 
 const item = buildBridgeInsertItem(itemConfig())
 
@@ -26,6 +35,28 @@ describe('setup profile patch updater', () => {
     expect(dualAccount).toContain('adminQq: 20002')
     expect(dualAccount).toContain('selfLogInput:\n          enabled: false')
     expect(dualAccount).not.toContain('napcat_10001.log')
+  })
+
+  it('writes official QQ Bot config with the paired admin openid', () => {
+    const official = buildOfficialBridgeInsertItem({
+      pluginName: '/tmp/dsh-qq-bridge/dist/index.js',
+      appId: 'app:id',
+      appSecret: 'secret"value',
+      adminOpenId: 'admin-openid',
+      allowlistOpenIds: [],
+      sandbox: true,
+      commandPrefix: '/dsh',
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+    })
+
+    expect(official).toContain('platform: official')
+    expect(official).toContain('appId: "app:id"')
+    expect(official).toContain('appSecret: "secret\\"value"')
+    expect(official).toContain('adminOpenId: "admin-openid"')
+    expect(official).toContain('sandbox: true')
+    expect(official).toContain('notifications:\n          agentReply:\n            enabled: false')
+    expect(official).toContain('adminQq: 0')
   })
 
   it('replaces only existing dsh-qq-bridge insert item', () => {
@@ -122,6 +153,23 @@ describe('setup profile patch updater', () => {
     expect(result.content.startsWith('[]')).toBe(false)
   })
 
+  it('writes a single fixed profile backup that is replaced by the next setup write', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-profile-'))
+    const profilePath = join(dir, 'profile', 'cordis.patch.yml')
+    const backupPath = join(dir, 'tool', 'backups', 'cordis.patch.yml.bak')
+    await mkdir(join(dir, 'profile'), { recursive: true })
+    await writeFile(profilePath, 'first\n', 'utf8')
+
+    await expect(writeProfilePatchWithBackup(profilePath, 'second\n', backupPath)).resolves.toBe(backupPath)
+    expect(await readFile(profilePath, 'utf8')).toBe('second\n')
+    expect(await readFile(backupPath, 'utf8')).toBe('first\n')
+
+    await expect(writeProfilePatchWithBackup(profilePath, 'third\n', backupPath)).resolves.toBe(backupPath)
+    expect(await readFile(profilePath, 'utf8')).toBe('third\n')
+    expect(await readFile(backupPath, 'utf8')).toBe('second\n')
+    expect(await readdir(join(dir, 'tool', 'backups'))).toEqual(['cordis.patch.yml.bak'])
+  })
+
   it('does not add a duplicate permission loader entry', () => {
     const result = updateSetupProfilePatch('[]\n', item)
 
@@ -155,6 +203,12 @@ describe('setup profile patch updater', () => {
     expect(result.content).toBe('permission:\n  defaultPreset: danger-full-access\n')
   })
 
+  it('writes the selected permission defaultPreset into settings.yaml', () => {
+    const result = updatePermissionDefaultPreset('', 'workspace-write')
+
+    expect(result.content).toBe('permission:\n  defaultPreset: workspace-write\n')
+  })
+
   it('updates only permission defaultPreset in settings.yaml', () => {
     const before = [
       'models:',
@@ -171,6 +225,23 @@ describe('setup profile patch updater', () => {
     expect(result.content).toContain('models:\n  keep: true')
     expect(result.content).toContain('permission:\n  defaultPreset: danger-full-access\n  other: keep-me')
     expect(result.content).not.toContain('defaultPreset: workspace-write')
+  })
+
+  it('writes a single fixed settings backup that is replaced by the next setup write', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-settings-'))
+    const settingsPath = join(dir, 'home', 'settings.yaml')
+    const backupPath = join(dir, 'tool', 'backups', 'settings.yaml.bak')
+    await mkdir(join(dir, 'home'), { recursive: true })
+    await writeFile(settingsPath, 'permission:\n  defaultPreset: old\n', 'utf8')
+
+    await expect(writeSettingsWithBackup(settingsPath, 'permission:\n  defaultPreset: new\n', backupPath)).resolves.toBe(backupPath)
+    expect(await readFile(settingsPath, 'utf8')).toBe('permission:\n  defaultPreset: new\n')
+    expect(await readFile(backupPath, 'utf8')).toBe('permission:\n  defaultPreset: old\n')
+
+    await expect(writeSettingsWithBackup(settingsPath, 'permission:\n  defaultPreset: next\n', backupPath)).resolves.toBe(backupPath)
+    expect(await readFile(settingsPath, 'utf8')).toBe('permission:\n  defaultPreset: next\n')
+    expect(await readFile(backupPath, 'utf8')).toBe('permission:\n  defaultPreset: new\n')
+    expect(await readdir(join(dir, 'tool', 'backups'))).toEqual(['settings.yaml.bak'])
   })
 })
 

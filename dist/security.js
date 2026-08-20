@@ -14,7 +14,8 @@ export class AccessGate {
     allow(evt) {
         if (this.opts.mode === 'open')
             return true;
-        return evt.user_id === this.opts.adminQq || this.opts.allowlist.includes(evt.user_id);
+        const adminId = this.opts.adminId ?? this.opts.adminQq;
+        return evt.user_id === adminId || this.opts.allowlist.includes(evt.user_id);
     }
     /**
      * 剥离指令前缀,返回剩余有效载荷;若不以前缀开头返回 null。

@@ -1,4 +1,4 @@
-import { OnebotActionResponse, OnebotMessageEvent } from './types.js';
+import { MessageTargetId, OnebotActionResponse, OnebotMessageEvent, PlatformReplyTarget } from './types.js';
 /**
  * 极简 WS 传输抽象,便于在测试中注入 mock(本地回环仿真),无需真实连接 NapCat。
  */
@@ -55,8 +55,8 @@ export declare class OnebotClient {
     connect(): Promise<void>;
     onMessage(cb: (evt: OnebotMessageEvent) => void): () => void;
     private handleFrame;
-    sendPrivate(userId: number, message: string): Promise<OnebotActionResponse>;
-    sendGroup(groupId: number, message: string): Promise<OnebotActionResponse>;
+    sendPrivate(userId: MessageTargetId, message: string, _replyTarget?: PlatformReplyTarget): Promise<OnebotActionResponse>;
+    sendGroup(groupId: MessageTargetId, message: string, _replyTarget?: PlatformReplyTarget): Promise<OnebotActionResponse>;
     private flush;
     disconnect(): Promise<void>;
 }

@@ -77,11 +77,11 @@ For existing scripts, npm start still runs echo mode.`);
 function printSetupHelp() {
     console.log(`dsh-qq-bridge setup
 
-Interactive setup wizard for Linux/WSL2 + NapCat CLI.
+Interactive setup wizard for Linux/WSL2 + NapCat CLI or Tencent official QQ Bot.
 
-It previews and writes the DSH web profile, then checks/starts
-NapCat, prints log commands for QR login, configures local OneBot
-WebSocket, and optionally starts DSH web.`);
+It previews and writes the DSH web profile, configures either
+NapCat/OneBot or an official QQ Bot pairing, and optionally starts
+DSH web.`);
 }
 function printWebHelp() {
     console.log(`dsh-qq-bridge web
