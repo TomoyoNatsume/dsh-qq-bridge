@@ -1,10 +1,6 @@
 # dsh-qq-bridge · QQ Remote Control for DSH
 
 <p align="center">
-  <img src="docs/asset/test1.png" alt="QQ 验证成功截图" width="420">
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/DSH-plugin-blue?style=flat-square" alt="DSH Plugin">
   &nbsp;
   <img src="https://img.shields.io/badge/QQ-NapCat%20%2F%20OneBot-12b7f5?style=flat-square" alt="NapCat OneBot">
@@ -14,10 +10,6 @@
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License">
 </p>
 
-<p align="center">
-  <strong>把 QQ 变成 DeepSeek Harness（DSH）的私人工具入口</strong><br>
-  <em>NapCat 单号模式 · OneBot WebSocket · 腾讯官方 QQ Bot · setup 自动写入 profile · QQ 远程触发 Agent</em>
-</p>
 
 <div align="center">
 
@@ -39,6 +31,18 @@
 </div>
 
 ## 是什么
+
+- 控制鲸鱼娘：
+
+<p align="center">
+  <img src="docs/asset/test0.jpg" alt="控制鲸鱼娘" width="760">
+</p>
+
+- web 会话完成提醒：
+
+<p align="center">
+  <img src="docs/asset/AgentReply.jpg" alt="会话完成提醒" width="760">
+</p>
 
 dsh-qq-bridge 是一个 DeepSeek Harness（DSH）Web profile 插件，用来把 QQ 消息转成 DSH Agent 会话请求，再把 Agent 回复发回 QQ。最常用的链路是：
 
