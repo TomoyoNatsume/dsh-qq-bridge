@@ -190,7 +190,7 @@ async function runOfficialSetup(prompt: Prompter): Promise<void> {
 async function collectAnswers(prompt: Prompter): Promise<SetupAnswers> {
   const napcatQq = await promptQq(prompt, '请输入DSH用于登陆后台的QQ号')
   const common = await collectCommonAnswers(prompt)
-  const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', true)
+  const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', false)
   const senderQq = selfLogEnabled ? napcatQq : await promptQq(prompt, '请输入发送指令的QQ号')
   const napcatRoot = await resolveNapcatRoot(prompt)
   return { ...common, napcatQq, senderQq, selfLogEnabled, napcatRoot }

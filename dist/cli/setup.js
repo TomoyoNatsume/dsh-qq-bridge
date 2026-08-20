@@ -123,7 +123,7 @@ async function runOfficialSetup(prompt) {
 async function collectAnswers(prompt) {
     const napcatQq = await promptQq(prompt, '请输入DSH用于登陆后台的QQ号');
     const common = await collectCommonAnswers(prompt);
-    const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', true);
+    const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', false);
     const senderQq = selfLogEnabled ? napcatQq : await promptQq(prompt, '请输入发送指令的QQ号');
     const napcatRoot = await resolveNapcatRoot(prompt);
     return { ...common, napcatQq, senderQq, selfLogEnabled, napcatRoot };
@@ -395,7 +395,7 @@ function printNapcatStatus(status) {
         console.log('识别结果: NapCat 已启动，但看起来尚未登录。');
     }
     else if (status.runtime === 'running') {
-        console.log('识别结果: NapCat 已启动。请查看日志确认是否已登录。');
+        console.log('识别结果: NapCat 已启动。登录状态请以日志为准。');
     }
     else if (status.runtime === 'not-running') {
         console.log('识别结果: NapCat 未启动。');
