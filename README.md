@@ -20,7 +20,7 @@
 <div align="center">
 
 <h2><span style="color:#16a34a;">想随时随地操控鲸鱼娘帮你干活？</span></h2>
-<h2><span style="color:#2563eb;">把任务丢给鲸鱼娘就转头刷手机忘记盯任务进度？</span></h2>
+<h2><span style="color:#2563eb;">把任务丢给鲸鱼娘就转头刷手机忘记盯进度？</span></h2>
 
 <strong>把 DSH 绑定到 QQ：出门在外也能发任务，Web 对话完成后立刻提醒刷手机的你。</strong>
 
@@ -67,7 +67,7 @@ QQ 发送 /dsh ... -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 /dsh 列出当前目录下的文件
 ```
 
-插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀是 `/dsh`，可在 `access.commandPrefix` 中改成 `/ai`、`/bot` 等其它前缀。
+插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀是 `/dsh`，可在 `access.commandPrefix` 中任意修改。
 
 ### NapCat / OneBot 默认路径
 
@@ -78,9 +78,14 @@ NapCat 路径适合个人本机使用。setup 会检查 `napcat` 命令、启动
 - 单号模式：同一个 QQ 登录 NapCat，并从手机 QQ 给自己发消息，推荐新用户先用这个。
 - 双号模式：机器人小号登录 NapCat，主号给小号发 `/dsh ...`。
 
+> 单号模式下，可以收到`Agent完成自动提醒`，但可能无法实现提示哦~
+> 双号模式下，登陆DSH的账号不建议用*不常用小号*，因为小号登陆可能会被腾讯kill~
+
 ### 腾讯官方 QQ Bot 可选路径
 
 官方路径适合想用开放平台机器人账号的用户。setup 会提示你先到 [QQ 开放平台机器人控制台](https://q.qq.com/qqbot/dashboard/) 创建机器人，然后输入 AppID、AppSecret 和沙箱开关。
+
+>由于腾讯开放平台规则限制，当前插件若走QQ Bot路径，则不支持`Agent完成自动提醒`功能
 
 第一次配置时不需要手动找 `adminOpenId`：setup 会临时连接 QQBot 网关，生成一次性 `/dsh pair <code>`，你用管理员 QQ 发给机器人后，插件会自动读取 sender openid、回复“配对成功”，并写入 `official.adminOpenId`。
 
@@ -140,12 +145,15 @@ pid 文件在 `/tmp/dsh-qq-bridge-dsh-web.pid`，日志在 `/tmp/dsh-qq-bridge-d
    pnpm dsh plugin --profile web add github:TomoyoNatsume/dsh-qq-bridge
    ```
 
+> 过程中涉及到额外配置，新手建议安装插件后把插件提给你的AI，让他指导操作。
+
 2. 进入 web profile 并运行 setup：
 
    ```bash
    cd ~/.dsh/profiles/web
    pnpm exec dsh-qq-bridge setup
    ```
+> 注意setup过程中对于`Napcat/QQ bot`两种路径分别需要外部操作。请根据setup提示或者agent
 
 3. 重启或启动 `dsh web`，在 QQ 里发送：
 

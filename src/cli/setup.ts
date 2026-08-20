@@ -100,14 +100,17 @@ async function preflightBase(prompt: Prompter): Promise<void> {
   }
 }
 
-function preflightNapcat(): void {
+function preflightNapcat(): boolean {
   if (!commandExists('napcat')) {
-    throw new Error('缺少命令: napcat。请选择腾讯官方 QQ Bot，或先安装 NapCat 后再运行 setup。')
+    console.log(napcatCliInstallGuide())
+    process.exitCode = 1
+    return false
   }
+  return true
 }
 
 async function runNapcatSetup(prompt: Prompter): Promise<void> {
-  preflightNapcat()
+  if (!preflightNapcat()) return
   const answers = await collectAnswers(prompt)
   const logPath = defaultNapcatLogPath(answers.napcatQq, answers.napcatRoot)
 
@@ -127,6 +130,28 @@ async function runNapcatSetup(prompt: Prompter): Promise<void> {
     `如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`,
     '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。',
   )
+}
+
+export function napcatCliInstallGuide(): string {
+  return [
+    '',
+    '未检测到 NapCat CLI: 当前系统没有可用的 napcat 命令。',
+    '如果你要使用 NapCat / OneBot 路径，请先在 Linux / WSL2 终端执行:',
+    '',
+    '  cd ~',
+    '  curl -o napcat.sh https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.sh',
+    '  bash napcat.sh --docker n --cli y',
+    '',
+    '安装完成后确认命令可用:',
+    '',
+    '  napcat help',
+    '',
+    '确认可用后重新运行:',
+    '',
+    '  pnpm exec dsh-qq-bridge setup',
+    '',
+    '如果你不想安装 NapCat，请重新运行 setup 并选择“腾讯官方 QQ Bot”。',
+  ].join('\n')
 }
 
 async function runOfficialSetup(prompt: Prompter): Promise<void> {
@@ -163,10 +188,10 @@ async function runOfficialSetup(prompt: Prompter): Promise<void> {
 }
 
 async function collectAnswers(prompt: Prompter): Promise<SetupAnswers> {
-  const napcatQq = await promptQq(prompt, '请输入你的QQ号')
+  const napcatQq = await promptQq(prompt, '请输入DSH用于登陆后台的QQ号')
   const common = await collectCommonAnswers(prompt)
   const selfLogEnabled = await prompt.confirm('是否使用单号模式（自己给自己发消息）', true)
-  const senderQq = selfLogEnabled ? napcatQq : await promptQq(prompt, '请输入发送消息的QQ号')
+  const senderQq = selfLogEnabled ? napcatQq : await promptQq(prompt, '请输入发送指令的QQ号')
   const napcatRoot = await resolveNapcatRoot(prompt)
   return { ...common, napcatQq, senderQq, selfLogEnabled, napcatRoot }
 }
