@@ -14,6 +14,20 @@ export { AgentRpcHandler } from './handlers/agent.js'
 export type { AgentExecutor } from './handlers/agent.js'
 export { DshAgentExecutor, extractLastAssistantText, hashKey } from './handlers/dsh-executor.js'
 export type { DshRenderedAgent } from './handlers/dsh-executor.js'
+export { DIR_COMMAND, DirectoryHandler, resolveUserPath } from './handlers/directory.js'
+export type { DirectorySwitcher } from './handlers/directory.js'
+export {
+  QQ_CONTROL_BLOCK_TAG,
+  QqControlDispatcher,
+  createSetCwdControlHandler,
+  parseQqControlBlocks,
+} from './handlers/control.js'
+export type {
+  ParsedQqControls,
+  QqControlAction,
+  QqControlActionHandler,
+  QqControlContext,
+} from './handlers/control.js'
 export { ShellHandler } from './handlers/shell.js'
 export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.js'
 export { DshQqBridgeConfig } from './config.js'

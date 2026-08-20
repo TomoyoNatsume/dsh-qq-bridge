@@ -1,0 +1,3 @@
+name: QQ 桥接模式
+description: dsh-qq-bridge 专用编码 Agent；仅 QQ 桥接会话会自动调用随附的回复风格 skill。
+order: 90

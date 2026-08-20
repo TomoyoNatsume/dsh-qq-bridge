@@ -6,6 +6,7 @@ export interface BridgeProfileConfig {
     commandPrefix: string;
     provider: string;
     model: string;
+    cwd: string;
     selfLogEnabled: boolean;
     selfLogPath?: string;
 }
@@ -19,6 +20,7 @@ export interface OfficialBridgeProfileConfig {
     commandPrefix: string;
     provider: string;
     model: string;
+    cwd: string;
 }
 export interface ProfileUpdateResult {
     changed: boolean;

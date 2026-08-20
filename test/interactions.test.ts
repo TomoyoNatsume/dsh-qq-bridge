@@ -53,7 +53,7 @@ describe('QQ interaction bridge', () => {
     expect(formatApprovalRequest({ agent: {}, toolName: 'bash', reason: 'needs file edit' }, [
       { index: 1, questionId: 'approval', label: '允许一次' },
       { index: 2, questionId: 'approval', label: '拒绝' },
-    ])).toContain('/dsh 1')
+    ], '/dsh')).toContain('/dsh 1')
 
     expect(formatAskUserRequest([{
       id: 'choice',
@@ -84,6 +84,41 @@ describe('QQ interaction bridge', () => {
     await expect(asking).resolves.toEqual({ answers: [{ id: 'confirm', selected: ['继续'] }] })
     expect(run).not.toHaveBeenCalled()
     expect(sent.at(-1)).toBe('已收到回复，Agent 会继续处理。')
+    dispose()
+  })
+
+  it('通过 optional inject 接入 userQuestions,不在未注入上下文读取服务', async () => {
+    const sent: string[] = []
+    const bridge = new QqInteractionBridge(async (_scope, _targetId, text) => void sent.push(text))
+    const agent = {}
+    bridge.bindAgent('private:10001', agent)
+    const userQuestions = { ask: vi.fn(async () => ({ answers: [] })) }
+    const injected = vi.fn((services: readonly string[], cb: (ctx: { userQuestions: typeof userQuestions }) => void) => {
+      expect(services).toEqual(['userQuestions'])
+      cb({ userQuestions })
+      return { dispose: vi.fn() }
+    })
+    const ctx = {
+      inject: injected,
+      get userQuestions(): typeof userQuestions {
+        throw new Error('cannot get property "userQuestions" without inject')
+      },
+    }
+
+    const dispose = bridge.register(ctx)
+    const asking = userQuestions.ask({
+      questions: [{ id: 'confirm', question: '继续?', options: [{ label: '继续' }] }],
+      agent,
+    })
+
+    expect(injected).toHaveBeenCalled()
+    expect(sent[0]).toContain('Agent 需要你的回复')
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const router = new MessageRouter(gate, async (_scope, _id, text) => void sent.push(text), bridge)
+
+    await router.route(makeEvent('/dsh 1'))
+
+    await expect(asking).resolves.toEqual({ answers: [{ id: 'confirm', selected: ['继续'] }] })
     dispose()
   })
 })

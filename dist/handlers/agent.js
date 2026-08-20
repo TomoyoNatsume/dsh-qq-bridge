@@ -1,11 +1,9 @@
-export const DEFAULT_QQ_MESSAGE_STYLE_PROMPT = [
-    '仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。',
-    '通过 QQ 回复时:',
-    '1. 先给结论。',
-    '2. 回复尽量简明扼要。',
-    '3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。',
-].join('\n');
-const QQ_SESSION_STYLE_REPEAT_INTERVAL = 30;
+import { parseQqControlBlocks } from './control.js';
+export const DEFAULT_QQ_REPLY_STYLE_SKILL_NAME = 'qq-session-reply-style';
+const QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL = 30;
+export function sessionKeyOf(ctx) {
+    return `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`;
+}
 /**
  * 把文本按最大长度切分为多条,保证每条不超过 maxLen。
  * 优先在换行/标点附近切(保持可读),实在没有边界则硬切。
@@ -37,12 +35,15 @@ export class AgentRpcHandler {
     executor;
     opts;
     name = 'agent';
-    qqStyleTurnCounts = new Map();
+    qqStyleSkillTurnCounts = new Map();
     constructor(executor, opts = {}) {
         this.executor = executor;
         this.opts = opts;
     }
     test(payload) {
+        if (this.opts.reservedCommands?.some((command) => payload === command || payload.startsWith(`${command} `))) {
+            return false;
+        }
         // 默认所有有效载荷都交给 Agent(可扩展:保留特定子命令给其它 handler)。
         // 若不希望 Agent 吞掉所有指令,可改成匹配某前缀,例如 payload 以 `ask ` 开头。
         return true;
@@ -55,9 +56,9 @@ export class AgentRpcHandler {
             await ctx.respond(part);
     }
     async run(ctx) {
-        const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`;
-        const sessionStyle = this.nextQqStyleInjection(sessionKey);
-        const payload = formatQqMessageStylePrompt(ctx.payload, this.opts.qqMessageStyle, sessionStyle);
+        const sessionKey = sessionKeyOf(ctx);
+        const styleSkill = this.nextQqStyleSkillInjection(sessionKey);
+        const payload = formatQqReplyStyleSkillPrompt(ctx.payload, styleSkill);
         const ackMessage = this.opts.ackMessage ?? '收到，正在处理...';
         const timeoutMs = this.opts.timeoutMs ?? 120_000;
         const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。';
@@ -65,11 +66,12 @@ export class AgentRpcHandler {
         try {
             if (ackMessage)
                 await this.respondChunk(ctx, ackMessage);
-            if (!this.opts.streamText) {
+            const canStreamText = this.opts.streamText && !this.opts.controlDispatcher;
+            if (!canStreamText) {
                 // AgentExecutor.run resolve 即本轮完成标志:DSH executor 在内部等待 agent.whenIdle()。
                 const result = await withTimeout(this.executor.run(sessionKey, payload), timeoutMs);
                 active = false;
-                await this.respondChunk(ctx, result || '(no output)');
+                await this.respondAgentOutput(ctx, sessionKey, result || '(no output)');
                 return;
             }
             const streamedText = [];
@@ -91,7 +93,7 @@ export class AgentRpcHandler {
             if (streamedText.join('').trim() === final.trim())
                 return;
             // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
-            await this.respondChunk(ctx, final);
+            await this.respondAgentOutput(ctx, sessionKey, final);
         }
         catch (err) {
             active = false;
@@ -101,48 +103,59 @@ export class AgentRpcHandler {
             await this.respondChunk(ctx, message);
         }
     }
-    nextQqStyleInjection(sessionKey) {
-        if (!this.opts.qqMessageStyle || this.opts.qqMessageStyle.enabled === false)
+    nextQqStyleSkillInjection(sessionKey) {
+        if (!this.opts.qqReplyStyleSkill || this.opts.qqReplyStyleSkill.enabled === false)
             return undefined;
-        const nextTurn = (this.qqStyleTurnCounts.get(sessionKey) ?? 0) + 1;
-        this.qqStyleTurnCounts.set(sessionKey, nextTurn);
+        const nextTurn = (this.qqStyleSkillTurnCounts.get(sessionKey) ?? 0) + 1;
+        this.qqStyleSkillTurnCounts.set(sessionKey, nextTurn);
+        const repeat = nextTurn === 1 || nextTurn % QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL === 0;
         return {
-            includeFull: nextTurn === 1 || nextTurn % QQ_SESSION_STYLE_REPEAT_INTERVAL === 0,
+            invokeSkill: repeat,
+            skillName: this.opts.qqReplyStyleSkill.skillName ?? DEFAULT_QQ_REPLY_STYLE_SKILL_NAME,
         };
     }
-}
-export function formatQqMessageStylePrompt(payload, style, sessionStyle) {
-    const sections = [];
-    if (style && style.enabled !== false) {
-        const prompt = (style.prompt ?? DEFAULT_QQ_MESSAGE_STYLE_PROMPT).trim();
-        if (prompt)
-            sections.push(formatQqSessionStyleInjection(sessionStyle ?? { includeFull: true }, prompt));
+    async respondAgentOutput(ctx, sessionKey, result) {
+        const dispatcher = this.opts.controlDispatcher;
+        if (!dispatcher) {
+            await this.respondChunk(ctx, result);
+            return;
+        }
+        const parsed = parseQqControlBlocks(result);
+        let responded = false;
+        for (const error of parsed.errors) {
+            responded = true;
+            await this.respondChunk(ctx, error);
+        }
+        for (const action of parsed.actions) {
+            const message = await dispatcher.dispatch(action, { sessionKey, source: ctx });
+            if (!message)
+                continue;
+            responded = true;
+            await this.respondChunk(ctx, message);
+        }
+        if (parsed.visibleText) {
+            responded = true;
+            await this.respondChunk(ctx, parsed.visibleText);
+        }
+        if (!responded)
+            await this.respondChunk(ctx, '(no output)');
     }
-    if (sections.length === 0)
+}
+export function formatQqReplyStyleSkillPrompt(payload, injection) {
+    if (!injection)
         return payload;
+    const sections = [
+        '本条用户消息来自 dsh-qq-bridge QQ 会话。',
+        '本次回复使用 QQ Session Temporary Reply Style；这是本次 QQ 会话的临时约束，不要把这条风格约束写入记忆，也不要应用到其它 DSH 会话。',
+    ];
+    if (injection.invokeSkill) {
+        sections.unshift(`/${injection.skillName}`);
+    }
     return [
         ...sections,
         '',
         'User QQ Message:',
         payload,
-    ].join('\n');
-}
-function formatQqSessionStyleInjection(sessionStyle, prompt) {
-    if (!sessionStyle?.includeFull) {
-        return [
-            'QQ Session Temporary Reply Style Reminder:',
-            '本次回复使用QQ Session Temporary Reply Style。',
-        ].join('\n');
-    }
-    return [
-        'QQ Session Temporary Reply Style:',
-        '本次回复使用QQ Session Temporary Reply Style。',
-        '以下内容只是本 QQ 会话的临时回复风格约束,不是用户事实、长期偏好或项目知识。',
-        '不要把这条风格约束写入任何记忆,也不要把它应用到其它会话。',
-        '不得改变系统原本对本次对话内容的记录策略。',
-        '',
-        '固定回复风格规则:',
-        prompt,
     ].join('\n');
 }
 export class AgentTimeoutError extends Error {

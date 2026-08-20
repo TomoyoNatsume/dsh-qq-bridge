@@ -56,12 +56,14 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         mode?: "whitelist" | "open" | undefined;
     }>>;
     agent: z.ZodDefault<z.ZodObject<{
-        /** DSH Web 的 agent preset;存在 agentPresets 服务时默认挂 standard。 */
+        /** DSH Web 的 agent preset;存在 agentPresets 服务时默认挂 QQ bridge 专用 preset。 */
         preset: z.ZodDefault<z.ZodOptional<z.ZodString>>;
         /** 驱动 agent 的 provider 路由(须有已注册适配器)。 */
         provider: z.ZodDefault<z.ZodString>;
         /** 驱动 agent 的模型 id(provider 适配器解释)。 */
         model: z.ZodDefault<z.ZodString>;
+        /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
+        cwd: z.ZodOptional<z.ZodString>;
         /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
         streamText: z.ZodDefault<z.ZodBoolean>;
         /** streamText=true 时,是否把思考过程(reasoning)也分段回发。默认 false。 */
@@ -74,16 +76,16 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         timeoutMs: z.ZodDefault<z.ZodNumber>;
         /** Agent 长时间无响应时回发的消息。 */
         timeoutMessage: z.ZodDefault<z.ZodString>;
-        /** 仅 QQ 入站消息使用的回复风格提示,不会影响其它 DSH 会话。 */
-        qqMessageStyle: z.ZodDefault<z.ZodObject<{
+        /** 仅 QQ 入站消息使用的回复风格 skill,不会影响其它 DSH 会话。 */
+        qqReplyStyleSkill: z.ZodDefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;
-            prompt: z.ZodDefault<z.ZodString>;
+            skillName: z.ZodDefault<z.ZodString>;
         }, "strip", z.ZodTypeAny, {
             enabled: boolean;
-            prompt: string;
+            skillName: string;
         }, {
             enabled?: boolean | undefined;
-            prompt?: string | undefined;
+            skillName?: string | undefined;
         }>>;
     }, "strip", z.ZodTypeAny, {
         preset: string;
@@ -95,23 +97,25 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage: string;
         timeoutMs: number;
         timeoutMessage: string;
-        qqMessageStyle: {
+        qqReplyStyleSkill: {
             enabled: boolean;
-            prompt: string;
+            skillName: string;
         };
+        cwd?: string | undefined;
     }, {
         preset?: string | undefined;
         provider?: string | undefined;
         model?: string | undefined;
+        cwd?: string | undefined;
         streamText?: boolean | undefined;
         streamReasoning?: boolean | undefined;
         maxMessageLength?: number | undefined;
         ackMessage?: string | undefined;
         timeoutMs?: number | undefined;
         timeoutMessage?: string | undefined;
-        qqMessageStyle?: {
+        qqReplyStyleSkill?: {
             enabled?: boolean | undefined;
-            prompt?: string | undefined;
+            skillName?: string | undefined;
         } | undefined;
     }>>;
     shell: z.ZodDefault<z.ZodObject<{
@@ -177,10 +181,11 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         ackMessage: string;
         timeoutMs: number;
         timeoutMessage: string;
-        qqMessageStyle: {
+        qqReplyStyleSkill: {
             enabled: boolean;
-            prompt: string;
+            skillName: string;
         };
+        cwd?: string | undefined;
     };
     napcat: {
         wsUrl: string;
@@ -220,15 +225,16 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         preset?: string | undefined;
         provider?: string | undefined;
         model?: string | undefined;
+        cwd?: string | undefined;
         streamText?: boolean | undefined;
         streamReasoning?: boolean | undefined;
         maxMessageLength?: number | undefined;
         ackMessage?: string | undefined;
         timeoutMs?: number | undefined;
         timeoutMessage?: string | undefined;
-        qqMessageStyle?: {
+        qqReplyStyleSkill?: {
             enabled?: boolean | undefined;
-            prompt?: string | undefined;
+            skillName?: string | undefined;
         } | undefined;
     } | undefined;
     napcat?: {

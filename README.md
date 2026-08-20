@@ -48,12 +48,12 @@
 dsh-qq-bridge 是一个 DeepSeek Harness（DSH）Web profile 插件，用来把 QQ 消息转成 DSH Agent 会话请求，再把 Agent 回复发回 QQ。最常用的链路是：
 
 ```text
-QQ 发送 /dsh ... -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
+QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 ```
 
-默认推荐走 **NapCat / OneBot**：用一个 QQ 号登录 NapCat，然后从手机 QQ 给自己发 `/dsh ...`，不需要额外准备机器人小号。也支持双号模式：一个 QQ 登录 NapCat，另一个 QQ 负责发指令。
+默认推荐走 **NapCat / OneBot**：用一个 QQ 号登录 NapCat，然后从手机 QQ 给自己发消息，不需要额外准备机器人小号。也支持双号模式：一个 QQ 登录 NapCat，另一个 QQ 负责发指令。
 
-如果不想使用 NapCat，也可以选择 **腾讯官方 QQ 开放平台机器人**。官方模式不需要扫码登录 NapCat，但需要在 QQ 开放平台创建机器人，并提供 AppID、AppSecret，再通过一次性 `/dsh pair <code>` 配对写入管理员 openid。
+如果不想使用 NapCat，也可以选择 **腾讯官方 QQ 开放平台机器人**。官方模式不需要扫码登录 NapCat，但需要在 QQ 开放平台创建机器人，并提供 AppID、AppSecret，再通过一次性 `pair <code>` 配对写入管理员 openid。
 
 当前不支持通过 QQ 的“我的电脑”会话完整交互；这类消息可以被日志捕获，但回复会回到当前 QQ 自身，链路不完整。项目背景和架构说明见 [docs/project-overview.md](docs/project-overview.md)，使用导图见 [docs/usage-guide.html](docs/usage-guide.html)。
 
@@ -61,14 +61,20 @@ QQ 发送 /dsh ... -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 ### QQ 遥控 DSH Agent
 
-在 QQ 里发送带前缀的消息即可触发 DSH：
+在 QQ 里直接发送消息即可触发 DSH：
 
 ```text
-/dsh 当前工作目录是什么
-/dsh 列出当前目录下的文件
+当前工作目录是什么
+列出当前目录下的文件
+/dir /home/xxx/project
+帮我把工作目录改到 /home/xxx/project
 ```
 
-插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀是 `/dsh`，可在 `access.commandPrefix` 中任意修改。
+插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀为空，白名单用户的所有消息都会进入 Agent；可在 `access.commandPrefix` 中改回 `/dsh`、`/ai` 等前缀。`/dir <目录>` 是内置控制命令，用来切换当前 QQ 会话的工作区，目录存在时下一条消息会使用新的 Agent session，并通过 DSH workspaceRegistry 归类到 Web UI 对应工作区。
+
+如果你用自然语言要求 Agent 切换工作目录，QQ 专用 preset 会让 Agent 输出私有控制块；插件会拦截并执行 `set_cwd`，不会把控制块内容发回 QQ。后续切换效果与 `/dir <目录>` 一致。
+
+内置控制命令会优先于 Agent 消息处理。后续新增 `/xxx` 指令时，只需要注册新的 handler 并放在 Agent fallback 前面；命中后会独占消费，不会把控制命令误发给 Agent。
 
 ### NapCat / OneBot 默认路径
 
@@ -76,7 +82,7 @@ NapCat 路径适合个人本机使用。setup 会检查 `napcat` 命令、启动
 
 支持两种用法：
 
-- 双号模式：一个QQ号登录DSH，监听消息，另一个QQ号给DSH发送指令 `/dsh ...`，推荐新用户直接用这个。
+- 双号模式：一个QQ号登录DSH，监听消息，另一个QQ号给DSH发送指令，推荐新用户直接用这个。
 
 > 双号模式下，登陆DSH的账号不建议用*不常用小号*，因为不常用的号登陆可能会被腾讯服务端kill掉~
 
@@ -90,7 +96,7 @@ NapCat 路径适合个人本机使用。setup 会检查 `napcat` 命令、启动
 
 >由于腾讯开放平台规则限制，当前插件若走QQ Bot路径，则不支持`Agent完成自动提醒`功能
 
-第一次配置时不需要手动找 `adminOpenId`：setup 会临时连接 QQBot 网关，生成一次性 `/dsh pair <code>`，你用管理员 QQ 发给机器人后，插件会自动读取 sender openid、回复“配对成功”，并写入 `official.adminOpenId`。
+第一次配置时不需要手动找 `adminOpenId`：setup 会临时连接 QQBot 网关，生成一次性 `pair <code>`，你用管理员 QQ 发给机器人后，插件会自动读取 sender openid、回复“配对成功”，并写入 `official.adminOpenId`。
 
 > 官方 QQ Bot 的主动提醒有额度限制。插件在官方模式下默认关闭 `notifications.agentReply.enabled`，避免触发 `40034122` / `召回消息已达区间上限`。
 
@@ -161,7 +167,7 @@ pid 文件在 `/tmp/dsh-qq-bridge-dsh-web.pid`，日志在 `/tmp/dsh-qq-bridge-d
 3. 重启或启动 `dsh web`，在 QQ 里发送：
 
    ```text
-   /dsh ping
+   ping
    ```
 
 ### NapCat 安装
@@ -194,7 +200,7 @@ setup 会按你选择的接入方式完成配置：
 - NapCat 路径会校验 QQ 号、DSH 项目目录、NapCat 根目录、模型、单号/双号模式。
 - NapCat 路径会检查 `napcat status <QQ>`，未启动时自动执行 `napcat start <QQ>`。
 - NapCat 路径会配置 OneBot 正向 WebSocket：`127.0.0.1:3001`。
-- 官方 QQ Bot 路径会要求先创建机器人，输入 AppID、AppSecret、沙箱开关，并通过 `/dsh pair <code>` 自动配置 `adminOpenId`。
+- 官方 QQ Bot 路径会要求先创建机器人，输入 AppID、AppSecret、沙箱开关，并通过 `pair <code>` 自动配置 `adminOpenId`。
 - 可选更新 `~/.dsh/settings.yaml` 的 `permission.defaultPreset`。
 - 可选后台启动 DSH web。
 
@@ -205,14 +211,16 @@ setup 或手动修改 `cordis.patch.yml` 后，需要重启 `dsh web` 才会加�
 从手机 QQ 发送：
 
 ```text
-/dsh ping
+ping
 ```
 
 成功后再试：
 
 ```text
-/dsh 当前工作目录是什么
-/dsh 列出当前工作目录下的目录和文件
+当前工作目录是什么
+列出当前工作目录下的目录和文件
+/dir /home/xxx/project
+帮我把工作目录改到 /home/xxx/project
 ```
 
 如果是自己前台启动的 DSH web，启动成功后会看到类似界面：
@@ -255,7 +263,7 @@ official:
 access:
   adminQq: 0
   allowlist: []
-  commandPrefix: /dsh
+  commandPrefix: ""
   mode: whitelist
 notifications:
   agentReply:
@@ -272,7 +280,8 @@ notifications:
 agent:
   provider: deepseek-official
   model: deepseek-v4-pro
-  preset: standard
+  cwd: /home/xxx
+  preset: dsh-qq-bridge
   ackMessage: 收到，正在处理...
   timeoutMs: 120000
   timeoutMessage: agent 无响应，请稍后重试。
@@ -280,7 +289,8 @@ agent:
 
 - `provider`：DSH 里已配置好的模型提供方。
 - `model`：该 provider 下的模型 id。
-- `preset`：DSH agent preset，通常保持 `standard` 即可。
+- `cwd`：QQ Agent 默认工作目录。setup 会询问该目录，默认是 `~`；`/dir <目录>` 会覆盖当前 QQ 会话的后续 session 目录。
+- `preset`：QQ 会话使用的 DSH agent preset。setup 会安装 `dsh-qq-bridge` 专用 preset；普通 Web 会话不选它就不会看到 QQ 回复风格 skill。
 
 ### 更改确认消息和超时
 
@@ -295,29 +305,36 @@ agent:
 
 `timeoutMs` 是等待 Agent 的最长时间，单位毫秒；超时后回复 `timeoutMessage`。
 
-### QQ 回复风格
+### QQ 回复风格 Skill
 
-QQ 入口会给 Agent 追加固定回复风格提示，只影响通过本插件进入的 QQ 消息，不影响你在 DSH Web 里的普通对话：
+setup 会同步一个 QQ 专用 preset 到：
 
-```yaml
-agent:
-  qqMessageStyle:
-    enabled: true
-    prompt: |-
-      仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。
-      通过 QQ 回复时:
-      1. 先给结论。
-      2. 回复尽量简明扼要。
-      3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。
+```text
+~/.dsh/.agent-presets/dsh-qq-bridge
 ```
 
-每个 Agent 回合都会追加一句 `本次回复使用QQ Session Temporary Reply Style。`；第 1、30、60... 个 Agent 回合会重复完整固定规则，防止长上下文里被冲淡。
+这个 preset 挂载随附的回复风格 skill：
+
+```text
+~/.dsh/.agent-presets/dsh-qq-bridge/skills/qq-session-reply-style/SKILL.md
+~/.dsh/.agent-presets/dsh-qq-bridge/skills/qq-session-reply-style/references/reply-style.md
+```
+
+默认规则：
+
+- 先给结论。
+- 回复尽量简明扼要。
+- 不用 Markdown 风格，用纯文本，可以多用 emoji。
+
+插件只会在 QQ 会话的第 1、30、60... 个 Agent 回合主动发送 `/qq-session-reply-style`，让 DSH 的 skill 工具加载入口文件并按模块读取回复风格；其它 QQ 回合只附加一句很短的临时风格标记，避免每轮塞入大段 prompt。
+
+如果你要改 QQ 回复风格，优先改上面的 `references/reply-style.md`；`SKILL.md` 只作为入口和模块索引。注意保留“只适用于 dsh-qq-bridge QQ 会话、不要写入记忆、不要影响普通 DSH Web 会话”的限制。
 
 如果不想要 QQ 专属回复风格，改成：
 
 ```yaml
 agent:
-  qqMessageStyle:
+  qqReplyStyleSkill:
     enabled: false
 ```
 
@@ -373,7 +390,7 @@ access:
 
 ### 单号模式日志
 
-单号模式会读取 NapCat 日志，把“自己给自己”的 `/dsh ...` 转成内部消息：
+单号模式会读取 NapCat 日志，把“自己给自己”的消息转成内部消息：
 
 ```yaml
 selfLogInput:
@@ -430,7 +447,7 @@ DSH_QQ_SELF_LOG=true \
 bash scripts/start-local-echo.sh
 ```
 
-发送 `/dsh ping`，预期回复：
+发送 `ping`，预期回复：
 
 ```text
 echo: ping
@@ -446,9 +463,9 @@ echo: ping
 
 默认 `mode: whitelist`，只允许 `adminQq` / `allowlist`，或官方模式下的 `adminOpenId` / `allowlistOpenIds` 触发。`mode: open` 表示任何能给这个 QQ 或机器人发消息的人都可能触发 DSH，只适合临时调试。
 
-### 必须带指令前缀
+### 指令入口
 
-只有以 `commandPrefix` 开头的消息才会进入 DSH。普通聊天、群消息、无关消息不会被处理。
+默认 `commandPrefix: ""`，白名单用户的普通消息会直接进入 DSH。设置为 `/dsh`、`/ai` 等非空值后，只有以该前缀开头的消息才会进入 DSH。`/dir <目录>` 是内置工作区切换命令，默认空前缀时可直接发送。
 
 ### OneBot 只监听本机
 
@@ -486,7 +503,7 @@ selfLogInput:
   replayOnStart: false
 ```
 
-这能避免 DSH 重启时把历史 `/dsh` 消息重新执行一遍。
+这能避免 DSH 重启时把历史消息重新执行一遍。
 
 ## 停止服务
 
@@ -521,7 +538,7 @@ napcat log <你的QQ号>
 - NapCat 是否还在线。
 - 正向 WebSocket 是否开启，端口是否是 `3001`。
 - `~/.dsh/profiles/web/cordis.patch.yml` 里的 `napcat.token` 是否等于 OneBot access token。
-- 消息是否以 `/dsh` 开头。
+- 如果你设置了非空 `commandPrefix`，消息是否以该前缀开头。
 - `adminQq` 是否填的是发消息的 QQ。
 - 单号模式下 `selfLogInput.logPath` 是否正确。
 

@@ -40,6 +40,7 @@ export interface DshServiceHandles {
     getOrCreate(options: {
         sessionKey: string;
         sessionId: string;
+        cwd?: string;
     }): Promise<DshRenderedAgent>;
     /**
      * 投递用户消息并等待本轮完成。
@@ -59,8 +60,11 @@ export interface DshServiceHandles {
  */
 export declare class DshAgentExecutor implements AgentExecutor {
     private readonly dsh;
+    private readonly opts;
     private agents;
     private sessions;
+    private sessionCwds;
+    private sessionVersions;
     private queues;
     /**
      * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -68,16 +72,23 @@ export declare class DshAgentExecutor implements AgentExecutor {
      * 同一 boot 内多轮上下文仍通过 sessionKey→sessionId 映射保持。
      */
     private readonly bootSuffix;
-    constructor(dsh: DshServiceHandles);
+    constructor(dsh: DshServiceHandles, opts?: {
+        defaultCwd?: string;
+    });
     run(sessionKey: string, payload: string, onChunk?: (text: string, kind: 'text' | 'reasoning') => void): Promise<string>;
     private runNow;
     /** 优先读 live agent 的实时会话日志,缺省则退回持久化 surface。 */
     private readEvents;
     /** 主动丢弃某个会话的 live agent。 */
     disposeSession(sessionKey: string): Promise<void>;
+    /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
+    setCwd(sessionKey: string, cwd: string): Promise<void>;
+    /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */
+    getCwd(sessionKey: string): string;
     /** 释放全部 live agent(插件 teardown 时调用)。 */
     disposeAll(): Promise<void>;
     get liveSessionCount(): number;
+    private createSessionId;
 }
 /** 确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */
 export declare function hashKey(input: string): string;

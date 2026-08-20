@@ -4,6 +4,8 @@ import { MessageRouter } from './router.js';
 import { AccessGate } from './security.js';
 import { AgentRpcHandler } from './handlers/agent.js';
 import { DshAgentExecutor } from './handlers/dsh-executor.js';
+import { DIR_COMMAND, DirectoryHandler } from './handlers/directory.js';
+import { createSetCwdControlHandler, QqControlDispatcher } from './handlers/control.js';
 import { ShellHandler } from './handlers/shell.js';
 import { DshQqBridgeConfig } from './config.js';
 import { NapcatSelfLogInput } from './inputs/napcat-log.js';
@@ -43,10 +45,18 @@ export async function apply(ctx, options) {
         else
             await client.sendGroup(targetId, text, replyTarget);
     };
-    const interactions = new QqInteractionBridge(outbound);
+    const interactions = new QqInteractionBridge(outbound, cfg.access.commandPrefix);
     const unregisterInteractions = interactions.register(ctx);
     const router = new MessageRouter(gate, outbound, interactions);
-    const executor = makeDshExecutor(ctx, cfg.agent, interactions);
+    const workspaceAttachment = createWorkspaceAttachment(ctx);
+    const executor = makeDshExecutor(ctx, cfg.agent, interactions, workspaceAttachment.attach);
+    const controlDispatcher = new QqControlDispatcher();
+    controlDispatcher.register(createSetCwdControlHandler(executor));
+    const unregisterDirectory = router.register(new DirectoryHandler(executor));
+    let unregisterShell = () => { };
+    if (cfg.shell.enabled) {
+        unregisterShell = router.register(new ShellHandler(async (cmd) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })));
+    }
     const unregisterAgent = router.register(new AgentRpcHandler(executor, {
         streamText: cfg.agent.streamText,
         streamReasoning: cfg.agent.streamReasoning,
@@ -54,12 +64,10 @@ export async function apply(ctx, options) {
         ackMessage: cfg.agent.ackMessage,
         timeoutMs: cfg.agent.timeoutMs,
         timeoutMessage: cfg.agent.timeoutMessage,
-        qqMessageStyle: cfg.agent.qqMessageStyle,
+        qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
+        reservedCommands: [DIR_COMMAND],
+        controlDispatcher,
     }));
-    let unregisterShell = () => { };
-    if (cfg.shell.enabled) {
-        unregisterShell = router.register(new ShellHandler(async (cmd) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })));
-    }
     // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
     // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
     const unsubMessages = client.onMessage((evt) => {
@@ -84,8 +92,10 @@ export async function apply(ctx, options) {
     }
     return async () => {
         unregisterAgent();
+        unregisterDirectory();
         unregisterShell();
         unregisterInteractions();
+        workspaceAttachment.dispose();
         unsubMessages();
         replyNotifier();
         selfLogInput?.stop();
@@ -98,10 +108,10 @@ export default { name, inject, apply };
 export function agentReplyNotificationsEnabled(cfg) {
     return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official';
 }
-function makeDshExecutor(ctx, agentCfg, interactions) {
-    const handles = wireDsh(ctx, agentCfg, interactions);
+function makeDshExecutor(ctx, agentCfg, interactions, attachWorkspace) {
+    const handles = wireDsh(ctx, agentCfg, interactions, attachWorkspace);
     if (handles)
-        return new DshAgentExecutor(handles);
+        return new DshAgentExecutor(handles, { defaultCwd: agentCfg?.cwd });
     // 无 DSH 服务时占位,便于纯 CLI / 测试
     const fallback = {
         async getOrCreate() {
@@ -112,10 +122,10 @@ function makeDshExecutor(ctx, agentCfg, interactions) {
             return [];
         },
     };
-    return new DshAgentExecutor(fallback);
+    return new DshAgentExecutor(fallback, { defaultCwd: agentCfg?.cwd });
 }
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
-function wireDsh(ctx, agentCfg, interactions) {
+function wireDsh(ctx, agentCfg, interactions, attachWorkspace) {
     const loop = ctx.agentLoop;
     if (!loop)
         return undefined;
@@ -129,6 +139,7 @@ function wireDsh(ctx, agentCfg, interactions) {
             else if (agentCfg?.preset) {
                 console.warn(`[dsh-qq-bridge] agent preset "${agentCfg.preset}" requested but agentPresets service is unavailable`);
             }
+            const cwd = options.cwd ?? workdir();
             const handle = await loop.createAgent(ctx, {
                 sessionId: options.sessionId,
                 // agent 的 model 路由必须显式给出,否则 prompt 组装时 `{{model}}` 无值。
@@ -136,11 +147,12 @@ function wireDsh(ctx, agentCfg, interactions) {
                     ...(agentCfg?.provider ? { provider: agentCfg.provider } : {}),
                     ...(agentCfg?.model ? { model: agentCfg.model } : {}),
                 },
-                meta: { cwd: workdir(), ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
+                meta: { cwd, ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
                 ...(ctx.agentPresets && agentCfg?.preset
                     ? { setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, agentCfg.preset) }
                     : {}),
             });
+            await attachWorkspace?.(options.sessionId, cwd);
             interactions?.bindAgent(options.sessionKey, handle.agent);
             // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
             const session = handle.agent.session;
@@ -257,6 +269,49 @@ function wireDsh(ctx, agentCfg, interactions) {
         },
     };
 }
+function createWorkspaceAttachment(ctx) {
+    let registry;
+    const disposers = [];
+    if (ctx.inject) {
+        const fiber = ctx.inject(['workspaceRegistry'], (childCtx) => {
+            const scoped = childCtx;
+            const current = scoped.workspaceRegistry;
+            registry = current;
+            scoped.effect?.(() => () => {
+                if (registry === current)
+                    registry = undefined;
+            }, 'dsh-qq-bridge.workspaceRegistry');
+        }, 'dsh-qq-bridge.workspaceRegistry');
+        if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+            disposers.push(() => fiber.dispose());
+        }
+    }
+    else {
+        registry = ctx.workspaceRegistry;
+    }
+    return {
+        async attach(sessionId, cwd) {
+            const active = registry;
+            if (!active)
+                return;
+            await attachSessionToWorkspace(active, sessionId, cwd);
+        },
+        dispose() {
+            for (const dispose of disposers.splice(0))
+                dispose();
+            registry = undefined;
+        },
+    };
+}
+export async function attachSessionToWorkspace(registry, sessionId, cwd) {
+    try {
+        const workspace = await registry.create(cwd);
+        await workspace.attachSession(sessionId);
+    }
+    catch (err) {
+        console.warn(`[dsh-qq-bridge] failed to attach session ${sessionId} to workspace ${cwd}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
 function workdir() {
     try {
         return process.cwd();
@@ -360,6 +415,10 @@ export function buildConnectGuidance(cfg, err) {
         `1. 阅读给 Agent 的安装向导:${cfg.napcat.guideDoc ?? 'docs/agent-napcat-guide.md'}`,
         `2. 若尚未安装 NapCat,引导用户在官方 GitHub (NapNeko/NapCatQQ) 下载并扫码登录专属小号。`,
         `3. 启用正向 WebSocket,核对端口与 wsUrl(${cfg.napcat.wsUrl})一致。`,
-        `4. 连接成功后,从主号向机器人小号发送「/dsh ping」验证双向通信。`,
+        `4. 连接成功后,从主号向机器人小号发送「${formatCommandExample(cfg.access.commandPrefix, 'ping')}」验证双向通信。`,
     ].join('\n');
+}
+function formatCommandExample(commandPrefix, payload) {
+    const prefix = commandPrefix.trim();
+    return prefix ? `${prefix} ${payload}` : payload;
 }

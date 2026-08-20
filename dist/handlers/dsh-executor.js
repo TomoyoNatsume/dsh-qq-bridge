@@ -45,8 +45,11 @@ export function isUnexecutedDsmlToolCall(text) {
  */
 export class DshAgentExecutor {
     dsh;
+    opts;
     agents = new Map();
     sessions = new Map(); // sessionKey -> sessionId
+    sessionCwds = new Map();
+    sessionVersions = new Map();
     queues = new Map();
     /**
      * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -54,8 +57,9 @@ export class DshAgentExecutor {
      * 同一 boot 内多轮上下文仍通过 sessionKey→sessionId 映射保持。
      */
     bootSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    constructor(dsh) {
+    constructor(dsh, opts = {}) {
         this.dsh = dsh;
+        this.opts = opts;
     }
     async run(sessionKey, payload, onChunk) {
         const prev = this.queues.get(sessionKey) ?? Promise.resolve();
@@ -66,11 +70,15 @@ export class DshAgentExecutor {
     }
     async runNow(sessionKey, payload, onChunk) {
         const sessionIdExists = this.sessions.get(sessionKey);
-        const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}-${this.bootSuffix}`;
+        const sessionId = sessionIdExists ?? this.createSessionId(sessionKey);
         this.sessions.set(sessionKey, sessionId);
         let agent = this.agents.get(sessionKey);
         if (!agent) {
-            agent = await this.dsh.getOrCreate({ sessionKey, sessionId });
+            agent = await this.dsh.getOrCreate({
+                sessionKey,
+                sessionId,
+                cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
+            });
             this.agents.set(sessionKey, agent);
         }
         await this.dsh.deliver(agent, payload, onChunk);
@@ -117,16 +125,32 @@ export class DshAgentExecutor {
         this.sessions.delete(sessionKey);
         this.queues.delete(sessionKey);
     }
+    /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
+    async setCwd(sessionKey, cwd) {
+        this.sessionCwds.set(sessionKey, cwd);
+        this.sessionVersions.set(sessionKey, (this.sessionVersions.get(sessionKey) ?? 0) + 1);
+        await this.disposeSession(sessionKey);
+    }
+    /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */
+    getCwd(sessionKey) {
+        return this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd ?? process.cwd();
+    }
     /** 释放全部 live agent(插件 teardown 时调用)。 */
     async disposeAll() {
         const agents = [...this.agents.values()];
         this.agents.clear();
         this.sessions.clear();
+        this.sessionCwds.clear();
+        this.sessionVersions.clear();
         this.queues.clear();
         await Promise.all(agents.map((a) => a.dispose()));
     }
     get liveSessionCount() {
         return this.agents.size;
+    }
+    createSessionId(sessionKey) {
+        const version = this.sessionVersions.get(sessionKey) ?? 0;
+        return `qq-${hashKey(sessionKey)}-${this.bootSuffix}-${version}`;
     }
 }
 /** 确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */

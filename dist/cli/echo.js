@@ -24,7 +24,7 @@ export function runEcho() {
         access: {
             adminQq: envInt('DSH_QQ_ADMIN', 0),
             allowlist: [],
-            commandPrefix: process.env.DSH_QQ_PREFIX ?? '/dsh',
+            commandPrefix: process.env.DSH_QQ_PREFIX ?? '',
             mode: 'whitelist',
         },
         selfLogInput: {
@@ -69,7 +69,7 @@ export function runEcho() {
         .connect()
         .then(() => {
         console.log(`[dsh-qq-bridge] 已连接 ${cfg.napcat.wsUrl},prefix=${cfg.access.commandPrefix},admin=${cfg.access.adminQq}`);
-        console.log(`  发送「${cfg.access.commandPrefix} hello」到 QQ 即可看到回显。`);
+        console.log(`  发送「${formatCommandExample(cfg.access.commandPrefix, 'hello')}」到 QQ 即可看到回显。`);
     })
         .catch((err) => {
         console.error(buildConnectGuidance(cfg, err));
@@ -99,4 +99,8 @@ export function runEcho() {
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+}
+function formatCommandExample(commandPrefix, payload) {
+    const prefix = commandPrefix.trim();
+    return prefix ? `${prefix} ${payload}` : payload;
 }

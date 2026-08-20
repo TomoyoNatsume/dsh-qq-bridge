@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { buildBridgeInsertItem, buildOfficialBridgeInsertItem, updateSetupProfilePatch, writeProfilePatchWithBackup, } from './dsh-profile.js';
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from './dsh-settings.js';
 import { createOfficialPairCode, pairOfficialAdmin } from './official-pairing.js';
+import { installQqBridgePreset } from './qq-preset.js';
 import { canAcceptUserConfirmedLogin, classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, tryReadOnebotToken, updateOnebotConfigFile, } from './napcat.js';
 import { isPromptCancelledError, parseQq, Prompter } from './prompt.js';
 import { startDshWebBackground } from './dsh-runner.js';
@@ -74,7 +75,7 @@ async function runNapcatSetup(prompt) {
     }
     await configureDshProfile(answers, logPath, token);
     await configureDshSettings(answers.permissionDefault);
-    await maybeStartDshWeb(prompt, answers.dshCheckout, () => printVerifyGuidance(answers), () => printVerifyGuidance(answers, '启动后'), `如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`, '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。');
+    await maybeStartDshWeb(prompt, answers.dshCheckout, () => printVerifyGuidance(answers), () => printVerifyGuidance(answers, '启动后'), `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`, '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。');
 }
 export function napcatCliInstallGuide() {
     return [
@@ -103,7 +104,7 @@ async function runOfficialSetup(prompt) {
     console.log('确认机器人应用已创建，并准备好 AppID / AppSecret 后继续。\n');
     const answers = await collectOfficialAnswers(prompt);
     const pairCode = createOfficialPairCode();
-    const pairCommand = `${answers.commandPrefix} pair ${pairCode}`;
+    const pairCommand = formatCommandExample(answers.commandPrefix, `pair ${pairCode}`);
     console.log('\n开始配对腾讯官方 QQ Bot。');
     console.log('setup 会临时连接 QQBot 网关，收到一次性配对口令后自动读取你的 openid。');
     const adminOpenId = await pairOfficialAdmin({
@@ -118,7 +119,7 @@ async function runOfficialSetup(prompt) {
     console.log(`已收到配对消息，adminOpenId: ${adminOpenId}`);
     await configureOfficialDshProfile(answers, adminOpenId);
     await configureDshSettings(answers.permissionDefault);
-    await maybeStartDshWeb(prompt, answers.dshCheckout, () => printOfficialVerifyGuidance(answers), () => printOfficialVerifyGuidance(answers, '启动后'), `如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。`, '如果没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。');
+    await maybeStartDshWeb(prompt, answers.dshCheckout, () => printOfficialVerifyGuidance(answers), () => printOfficialVerifyGuidance(answers, '启动后'), `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。`, '如果没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。');
 }
 async function collectAnswers(prompt) {
     const napcatQq = await promptQq(prompt, '请输入DSH用于登陆后台的QQ号');
@@ -136,11 +137,12 @@ async function collectOfficialAnswers(prompt) {
     return { ...common, appId, appSecret, sandbox };
 }
 async function collectCommonAnswers(prompt) {
-    const commandPrefix = await prompt.text('设置发送指令时的前缀', '/dsh');
+    const commandPrefix = await prompt.text('设置发送指令时的前缀（默认空: 不需要前缀，白名单用户的所有消息都会进入 Agent）', '');
     const model = await prompt.choice('选择模型', ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash');
     const dshCheckout = await promptExistingDirectory(prompt, 'DSH / deepseek-harness 目录', process.env.DSH_CHECKOUT ?? join(homedir(), 'deepseek-harness'));
+    const agentCwd = await promptExistingDirectory(prompt, 'QQ Agent 默认工作目录', '~');
     const permissionDefault = await promptPermissionDefault(prompt);
-    return { commandPrefix, model, dshCheckout, permissionDefault };
+    return { commandPrefix, model, dshCheckout, agentCwd, permissionDefault };
 }
 async function promptRequiredText(prompt, label) {
     while (true) {
@@ -188,6 +190,8 @@ async function resolveNapcatRoot(prompt) {
 }
 async function configureDshProfile(answers, logPath, token) {
     const profilePath = join(resolveDshHome(), 'profiles', 'web', 'cordis.patch.yml');
+    const preset = await installQqBridgePreset(resolveDshHome());
+    console.log(`\n已同步 QQ 专用 agent preset: ${preset.targetDir}`);
     const pluginName = fileURLToPath(new URL('../index.js', import.meta.url));
     const item = buildBridgeInsertItem({
         pluginName,
@@ -197,6 +201,7 @@ async function configureDshProfile(answers, logPath, token) {
         commandPrefix: answers.commandPrefix,
         provider: 'deepseek-official',
         model: answers.model,
+        cwd: answers.agentCwd,
         selfLogEnabled: answers.selfLogEnabled,
         selfLogPath: answers.selfLogEnabled ? logPath : undefined,
     });
@@ -209,6 +214,8 @@ async function configureDshProfile(answers, logPath, token) {
 }
 async function configureOfficialDshProfile(answers, adminOpenId) {
     const profilePath = join(resolveDshHome(), 'profiles', 'web', 'cordis.patch.yml');
+    const preset = await installQqBridgePreset(resolveDshHome());
+    console.log(`\n已同步 QQ 专用 agent preset: ${preset.targetDir}`);
     const pluginName = fileURLToPath(new URL('../index.js', import.meta.url));
     const item = buildOfficialBridgeInsertItem({
         pluginName,
@@ -220,6 +227,7 @@ async function configureOfficialDshProfile(answers, adminOpenId) {
         commandPrefix: answers.commandPrefix,
         provider: 'deepseek-official',
         model: answers.model,
+        cwd: answers.agentCwd,
     });
     const previous = await readFile(profilePath, 'utf8').catch(() => '[]\n');
     const update = updateSetupProfilePatch(previous, item);
@@ -438,13 +446,17 @@ function restartNapcatForQr(qq) {
 }
 function printVerifyGuidance(answers, prefix = '请') {
     if (answers.selfLogEnabled) {
-        console.log(`${prefix}在 QQ 给自己发送: ${answers.commandPrefix} ping`);
+        console.log(`${prefix}在 QQ 给自己发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`);
         return;
     }
-    console.log(`${prefix}用 QQ ${answers.senderQq} 给 QQ ${answers.napcatQq} 发送: ${answers.commandPrefix} ping`);
+    console.log(`${prefix}用 QQ ${answers.senderQq} 给 QQ ${answers.napcatQq} 发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`);
 }
 function printOfficialVerifyGuidance(answers, prefix = '请') {
-    console.log(`${prefix}用刚才配对的 QQ 给官方机器人发送: ${answers.commandPrefix} ping`);
+    console.log(`${prefix}用刚才配对的 QQ 给官方机器人发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`);
+}
+function formatCommandExample(commandPrefix, payload) {
+    const prefix = commandPrefix.trim();
+    return prefix ? `${prefix} ${payload}` : payload;
 }
 function printSetupRefreshGuidance() {
     console.log(yellow('如果重新 setup、重新配置 OneBot token、重配 NapCat、或更换 QQ Bot 应用，请重新运行 setup 更新配置。'));

@@ -19,7 +19,7 @@ export class MessageRouter {
      * 处理一条入站消息:
      * 1. 白名单过滤
      * 2. 前缀剥离
-     * 3. 匹配 handler 并执行
+     * 3. 按注册顺序匹配 handler。
      * 返回是否被消费(被 router 处理且至少一个 handler 匹配)。
      */
     async route(evt) {
@@ -52,6 +52,8 @@ export class MessageRouter {
             if (handler.test(payload)) {
                 consumed = true;
                 await handler.run(ctx);
+                if (!handler.continueAfterRun)
+                    return true;
             }
         }
         return consumed;

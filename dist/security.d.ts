@@ -6,7 +6,7 @@ export interface AccessOptions {
     adminId?: MessageTargetId;
     /** 额外允许的 user_id/openid */
     allowlist: MessageTargetId[];
-    /** 指令前缀,如 '/dsh' */
+    /** 指令前缀。空字符串表示白名单用户的所有消息都进入 router。 */
     commandPrefix: string;
     /** whitelist: 只允许 admin+allowlist;open: 任何人都能触发(仅测试用) */
     mode: 'whitelist' | 'open';
@@ -25,7 +25,7 @@ export declare class AccessGate {
     allow(evt: Pick<OnebotMessageEvent, 'user_id'>): boolean;
     /**
      * 剥离指令前缀,返回剩余有效载荷;若不以前缀开头返回 null。
-     * 这样消息必须显式以 '/dsh' 开头才被处理(避免打扰其他 QQ 用法)。
+     * commandPrefix 为空时返回整条消息,由白名单决定是否放行。
      */
     stripPrefix(text: string): string | null;
 }

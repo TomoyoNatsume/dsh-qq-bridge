@@ -4,6 +4,8 @@ import { MessageRouter, OutboundSender } from './router.js'
 import { AccessGate } from './security.js'
 import { AgentRpcHandler } from './handlers/agent.js'
 import { DshAgentExecutor, DshRenderedAgent } from './handlers/dsh-executor.js'
+import { DIR_COMMAND, DirectoryHandler } from './handlers/directory.js'
+import { createSetCwdControlHandler, QqControlDispatcher } from './handlers/control.js'
 import { ShellHandler } from './handlers/shell.js'
 import { DshQqBridgeConfig } from './config.js'
 import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js'
@@ -38,6 +40,7 @@ interface DshCtx extends InteractionCtxLike {
   sessionQuery?: {
     readSurface(sessionId: string): Promise<{ events: readonly unknown[] }>
   }
+  workspaceRegistry?: DshWorkspaceRegistry
   on?(
     event: 'session/event',
     cb: (subject: DshSessionSubject, event: unknown) => void,
@@ -49,6 +52,15 @@ interface DshCtx extends InteractionCtxLike {
     options?: { prepend?: boolean },
   ): () => void
   on?(event: string, cb: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void
+}
+
+export interface DshWorkspace {
+  id?: string
+  attachSession(sessionId: string): Promise<void>
+}
+
+export interface DshWorkspaceRegistry {
+  create(path: string): Promise<DshWorkspace>
 }
 
 interface DshSessionSubject {
@@ -100,20 +112,15 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
     if (scope === 'private') await client.sendPrivate(targetId, text, replyTarget)
     else await client.sendGroup(targetId, text, replyTarget)
   }
-  const interactions = new QqInteractionBridge(outbound)
+  const interactions = new QqInteractionBridge(outbound, cfg.access.commandPrefix)
   const unregisterInteractions = interactions.register(ctx)
   const router = new MessageRouter(gate, outbound, interactions)
+  const workspaceAttachment = createWorkspaceAttachment(ctx)
 
-  const executor = makeDshExecutor(ctx, cfg.agent, interactions)
-  const unregisterAgent = router.register(new AgentRpcHandler(executor, {
-    streamText: cfg.agent.streamText,
-    streamReasoning: cfg.agent.streamReasoning,
-    maxMessageLength: cfg.agent.maxMessageLength,
-    ackMessage: cfg.agent.ackMessage,
-    timeoutMs: cfg.agent.timeoutMs,
-    timeoutMessage: cfg.agent.timeoutMessage,
-    qqMessageStyle: cfg.agent.qqMessageStyle,
-  }))
+  const executor = makeDshExecutor(ctx, cfg.agent, interactions, workspaceAttachment.attach)
+  const controlDispatcher = new QqControlDispatcher()
+  controlDispatcher.register(createSetCwdControlHandler(executor))
+  const unregisterDirectory = router.register(new DirectoryHandler(executor))
 
   let unregisterShell: () => void = () => {}
   if (cfg.shell.enabled) {
@@ -121,6 +128,18 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
       new ShellHandler(async (cmd: string) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })),
     )
   }
+
+  const unregisterAgent = router.register(new AgentRpcHandler(executor, {
+    streamText: cfg.agent.streamText,
+    streamReasoning: cfg.agent.streamReasoning,
+    maxMessageLength: cfg.agent.maxMessageLength,
+    ackMessage: cfg.agent.ackMessage,
+    timeoutMs: cfg.agent.timeoutMs,
+    timeoutMessage: cfg.agent.timeoutMessage,
+    qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
+    reservedCommands: [DIR_COMMAND],
+    controlDispatcher,
+  }))
 
   // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
   // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
@@ -150,8 +169,10 @@ export async function apply(ctx: DshCtx, options: DshQqBridgeConfig): Promise<()
 
   return async () => {
     unregisterAgent()
+    unregisterDirectory()
     unregisterShell()
     unregisterInteractions()
+    workspaceAttachment.dispose()
     unsubMessages()
     replyNotifier()
     selfLogInput?.stop()
@@ -169,11 +190,12 @@ export function agentReplyNotificationsEnabled(cfg: DshQqBridgeConfig): boolean 
 
 function makeDshExecutor(
   ctx: DshCtx,
-  agentCfg?: { preset?: string; provider?: string; model?: string },
+  agentCfg?: { preset?: string; provider?: string; model?: string; cwd?: string },
   interactions?: QqInteractionBridge,
+  attachWorkspace?: (sessionId: string, cwd: string) => Promise<void>,
 ) {
-  const handles = wireDsh(ctx, agentCfg, interactions)
-  if (handles) return new DshAgentExecutor(handles)
+  const handles = wireDsh(ctx, agentCfg, interactions, attachWorkspace)
+  if (handles) return new DshAgentExecutor(handles, { defaultCwd: agentCfg?.cwd })
   // 无 DSH 服务时占位,便于纯 CLI / 测试
   const fallback = {
     async getOrCreate(): Promise<DshRenderedAgent> {
@@ -184,27 +206,29 @@ function makeDshExecutor(
       return []
     },
   }
-  return new DshAgentExecutor(fallback)
+  return new DshAgentExecutor(fallback, { defaultCwd: agentCfg?.cwd })
 }
 
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
 function wireDsh(
   ctx: DshCtx,
-  agentCfg?: { preset?: string; provider?: string; model?: string },
+  agentCfg?: { preset?: string; provider?: string; model?: string; cwd?: string },
   interactions?: QqInteractionBridge,
+  attachWorkspace?: (sessionId: string, cwd: string) => Promise<void>,
 ) {
   const loop = ctx.agentLoop
   if (!loop) return undefined
   const query = ctx.sessionQuery
 
   return {
-    async getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent> {
+    async getOrCreate(options: { sessionKey: string; sessionId: string; cwd?: string }): Promise<DshRenderedAgent> {
       void options.sessionKey
       if (ctx.agentPresets && agentCfg?.preset) {
         console.info(`[dsh-qq-bridge] mounting agent preset "${agentCfg.preset}" for ${options.sessionId}`)
       } else if (agentCfg?.preset) {
         console.warn(`[dsh-qq-bridge] agent preset "${agentCfg.preset}" requested but agentPresets service is unavailable`)
       }
+      const cwd = options.cwd ?? workdir()
       const handle = await loop.createAgent(ctx, {
         sessionId: options.sessionId,
         // agent 的 model 路由必须显式给出,否则 prompt 组装时 `{{model}}` 无值。
@@ -212,11 +236,12 @@ function wireDsh(
           ...(agentCfg?.provider ? { provider: agentCfg.provider } : {}),
           ...(agentCfg?.model ? { model: agentCfg.model } : {}),
         },
-        meta: { cwd: workdir(), ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
+        meta: { cwd, ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
         ...(ctx.agentPresets && agentCfg?.preset
           ? { setup: async (agentCtx: unknown) => void await ctx.agentPresets!.mount(agentCtx, agentCfg.preset) }
           : {}),
       })
+      await attachWorkspace?.(options.sessionId, cwd)
       interactions?.bindAgent(options.sessionKey, handle.agent)
       // 捕获 live session 对象:用于 session/event 过滤(流式分段)。
       const session = (handle.agent as { session?: { id?: string } }).session
@@ -329,6 +354,52 @@ function wireDsh(
       const snap = await query.readSurface(sessionId)
       return snap.events
     },
+  }
+}
+
+function createWorkspaceAttachment(ctx: DshCtx): { attach(sessionId: string, cwd: string): Promise<void>; dispose(): void } {
+  let registry: DshWorkspaceRegistry | undefined
+  const disposers: Array<() => void> = []
+
+  if (ctx.inject) {
+    const fiber = ctx.inject(['workspaceRegistry'], (childCtx) => {
+      const scoped = childCtx as DshCtx
+      const current = scoped.workspaceRegistry
+      registry = current
+      scoped.effect?.(() => () => {
+        if (registry === current) registry = undefined
+      }, 'dsh-qq-bridge.workspaceRegistry')
+    }, 'dsh-qq-bridge.workspaceRegistry')
+    if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+      disposers.push(() => fiber.dispose())
+    }
+  } else {
+    registry = ctx.workspaceRegistry
+  }
+
+  return {
+    async attach(sessionId: string, cwd: string): Promise<void> {
+      const active = registry
+      if (!active) return
+      await attachSessionToWorkspace(active, sessionId, cwd)
+    },
+    dispose(): void {
+      for (const dispose of disposers.splice(0)) dispose()
+      registry = undefined
+    },
+  }
+}
+
+export async function attachSessionToWorkspace(
+  registry: DshWorkspaceRegistry,
+  sessionId: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    const workspace = await registry.create(cwd)
+    await workspace.attachSession(sessionId)
+  } catch (err) {
+    console.warn(`[dsh-qq-bridge] failed to attach session ${sessionId} to workspace ${cwd}: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -448,6 +519,11 @@ export function buildConnectGuidance(cfg: DshQqBridgeConfig, err: unknown): stri
     `1. 阅读给 Agent 的安装向导:${cfg.napcat.guideDoc ?? 'docs/agent-napcat-guide.md'}`,
     `2. 若尚未安装 NapCat,引导用户在官方 GitHub (NapNeko/NapCatQQ) 下载并扫码登录专属小号。`,
     `3. 启用正向 WebSocket,核对端口与 wsUrl(${cfg.napcat.wsUrl})一致。`,
-    `4. 连接成功后,从主号向机器人小号发送「/dsh ping」验证双向通信。`,
+    `4. 连接成功后,从主号向机器人小号发送「${formatCommandExample(cfg.access.commandPrefix, 'ping')}」验证双向通信。`,
   ].join('\n')
+}
+
+function formatCommandExample(commandPrefix: string, payload: string): string {
+  const prefix = commandPrefix.trim()
+  return prefix ? `${prefix} ${payload}` : payload
 }

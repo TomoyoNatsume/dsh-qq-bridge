@@ -10,6 +10,7 @@ import {
   writeProfilePatchWithBackup,
 } from '../src/cli/dsh-profile.js'
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from '../src/cli/dsh-settings.js'
+import { installQqBridgePreset } from '../src/cli/qq-preset.js'
 
 const item = buildBridgeInsertItem(itemConfig())
 
@@ -21,7 +22,17 @@ describe('setup profile patch updater', () => {
     })
 
     expect(quoted).toContain('token: "abc:def\\"ghi"')
+    expect(quoted).toContain('commandPrefix: "/dsh"')
     expect(quoted).not.toContain('process.env.DSH_QQ_TOKEN')
+  })
+
+  it('writes an empty command prefix as an explicit yaml string', () => {
+    const noPrefix = buildBridgeInsertItem({
+      ...itemConfig(),
+      commandPrefix: '',
+    })
+
+    expect(noPrefix).toContain('commandPrefix: ""')
   })
 
   it('writes sender qq as adminQq when self log mode is disabled', () => {
@@ -34,8 +45,10 @@ describe('setup profile patch updater', () => {
 
     expect(dualAccount).toContain('adminQq: 20002')
     expect(dualAccount).toContain('selfLogInput:\n          enabled: false')
-    expect(dualAccount).toContain('qqMessageStyle:\n            enabled: true')
-    expect(dualAccount).toContain('不要写入记忆系统')
+    expect(dualAccount).toContain('preset: dsh-qq-bridge')
+    expect(dualAccount).toContain('cwd: "/home/me/work"')
+    expect(dualAccount).toContain('qqReplyStyleSkill:\n            enabled: true')
+    expect(dualAccount).toContain('skillName: qq-session-reply-style')
     expect(dualAccount).not.toContain('napcat_10001.log')
   })
 
@@ -50,6 +63,7 @@ describe('setup profile patch updater', () => {
       commandPrefix: '/dsh',
       provider: 'deepseek-official',
       model: 'deepseek-v4-flash',
+      cwd: '/home/me/work',
     })
 
     expect(official).toContain('platform: official')
@@ -59,8 +73,10 @@ describe('setup profile patch updater', () => {
     expect(official).toContain('sandbox: true')
     expect(official).toContain('notifications:\n          agentReply:\n            enabled: false')
     expect(official).toContain('adminQq: 0')
-    expect(official).toContain('qqMessageStyle:\n            enabled: true')
-    expect(official).toContain('不要影响其它 DSH 对话')
+    expect(official).toContain('preset: dsh-qq-bridge')
+    expect(official).toContain('cwd: "/home/me/work"')
+    expect(official).toContain('qqReplyStyleSkill:\n            enabled: true')
+    expect(official).toContain('skillName: qq-session-reply-style')
   })
 
   it('replaces only existing dsh-qq-bridge insert item', () => {
@@ -247,6 +263,27 @@ describe('setup profile patch updater', () => {
     expect(await readFile(backupPath, 'utf8')).toBe('permission:\n  defaultPreset: new\n')
     expect(await readdir(join(dir, 'tool', 'backups'))).toEqual(['settings.yaml.bak'])
   })
+
+  it('installs the QQ bridge preset and bundled reply style skill', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-preset-'))
+
+    const result = await installQqBridgePreset(dir)
+
+    expect(result.targetDir).toBe(join(dir, '.agent-presets', 'dsh-qq-bridge'))
+    expect(await readFile(join(result.targetDir, 'preset.yml'), 'utf8')).toContain('QQ 桥接模式')
+    const composition = await readFile(join(result.targetDir, 'agent.cordis.yml'), 'utf8')
+    expect(composition).toContain('customSkillDirs')
+    expect(composition).toContain(JSON.stringify(join(result.targetDir, 'skills')))
+    expect(composition).not.toContain('__DSH_QQ_BRIDGE_SKILLS_DIR__')
+    expect(await readFile(
+      join(result.targetDir, 'skills', 'qq-session-reply-style', 'SKILL.md'),
+      'utf8',
+    )).toContain('references/reply-style.md')
+    expect(await readFile(
+      join(result.targetDir, 'skills', 'qq-session-reply-style', 'references', 'reply-style.md'),
+      'utf8',
+    )).toContain('Put the conclusion first')
+  })
 })
 
 function itemConfig() {
@@ -258,6 +295,7 @@ function itemConfig() {
     commandPrefix: '/dsh',
     provider: 'deepseek-official',
     model: 'deepseek-v4-pro',
+    cwd: '/home/me/work',
     selfLogEnabled: true,
     selfLogPath: '/home/me/Napcat/log/napcat_10001.log',
   }

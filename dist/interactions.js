@@ -1,10 +1,12 @@
 /** Routes DSH human-interaction requests through the QQ command channel. */
 export class QqInteractionBridge {
     outbound;
+    commandPrefix;
     agentTargets = new WeakMap();
     pendingByTarget = new Map();
-    constructor(outbound) {
+    constructor(outbound, commandPrefix = '') {
         this.outbound = outbound;
+        this.commandPrefix = commandPrefix;
     }
     bindAgent(sessionKey, agent) {
         if (typeof agent !== 'object' || agent === null)
@@ -22,18 +24,16 @@ export class QqInteractionBridge {
                 return this.askApproval(request);
             }, { prepend: true }));
         }
-        const userQuestions = ctx.userQuestions;
-        if (userQuestions) {
-            const originalAsk = userQuestions.ask.bind(userQuestions);
-            userQuestions.ask = (request) => {
-                if (request.agent !== undefined && this.targetForAgent(request.agent)) {
-                    return this.askUser(request);
-                }
-                return originalAsk(request);
-            };
-            disposers.push(() => {
-                userQuestions.ask = originalAsk;
-            });
+        if (ctx.inject) {
+            const fiber = ctx.inject(['userQuestions'], (childCtx) => {
+                this.registerUserQuestions(childCtx, disposers);
+            }, 'dsh-qq-bridge.userQuestions');
+            if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+                disposers.push(() => fiber.dispose());
+            }
+        }
+        else {
+            this.registerUserQuestions(ctx, disposers);
         }
         return () => {
             for (const dispose of disposers.splice(0))
@@ -43,6 +43,23 @@ export class QqInteractionBridge {
                 pending.reject(new Error('QQ interaction bridge disposed'));
             }
         };
+    }
+    registerUserQuestions(ctx, disposers) {
+        const userQuestions = ctx.userQuestions;
+        if (userQuestions) {
+            const originalAsk = userQuestions.ask.bind(userQuestions);
+            const wrappedAsk = (request) => {
+                if (request.agent !== undefined && this.targetForAgent(request.agent)) {
+                    return this.askUser(request);
+                }
+                return originalAsk(request);
+            };
+            userQuestions.ask = wrappedAsk;
+            disposers.push(() => {
+                if (userQuestions.ask === wrappedAsk)
+                    userQuestions.ask = originalAsk;
+            });
+        }
     }
     async handle(ctx) {
         const targetId = ctx.scope === 'private' ? ctx.userId : ctx.groupId;
@@ -76,7 +93,7 @@ export class QqInteractionBridge {
             choices,
             signal: request.signal,
         });
-        await this.sendPrompt(target, formatApprovalRequest(request, choices));
+        await this.sendPrompt(target, formatApprovalRequest(request, choices, this.commandPrefix));
         return await answer;
     }
     async askUser(request) {
@@ -90,7 +107,7 @@ export class QqInteractionBridge {
             choices,
             signal: request.signal,
         });
-        await this.sendPrompt(target, formatAskUserRequest(request.questions, choices));
+        await this.sendPrompt(target, formatAskUserRequest(request.questions, choices, this.commandPrefix));
         return await answer;
     }
     async sendPrompt(target, text) {
@@ -136,7 +153,7 @@ export class QqInteractionBridge {
         return this.agentTargets.get(agent);
     }
 }
-export function formatApprovalRequest(request, choices) {
+export function formatApprovalRequest(request, choices, commandPrefix = '') {
     return [
         'Agent 需要确认:',
         `工具: ${request.toolName}`,
@@ -144,10 +161,10 @@ export function formatApprovalRequest(request, choices) {
         '',
         ...choices.map((choice) => `${choice.index}. ${choice.label}`),
         '',
-        '请回复“指令前缀 + 编号”，例如 /dsh 1 或 /dsh 2。',
+        `请回复“指令前缀 + 编号”，例如 ${formatCommandExample(commandPrefix, '1')} 或 ${formatCommandExample(commandPrefix, '2')}。`,
     ].join('\n');
 }
-export function formatAskUserRequest(questions, choices) {
+export function formatAskUserRequest(questions, choices, commandPrefix = '') {
     const lines = ['Agent 需要你的回复:'];
     for (const question of questions) {
         lines.push('', question.header ? `${question.header}: ${question.question}` : question.question);
@@ -159,7 +176,7 @@ export function formatAskUserRequest(questions, choices) {
             lines.push(`${choice.index}. ${choice.label}${option?.description ? ` - ${option.description}` : ''}`);
         }
     }
-    lines.push('', '请回复“指令前缀 + 编号”，例如 /dsh 1；也可以直接回复自定义内容。');
+    lines.push('', `请回复“指令前缀 + 编号”，例如 ${formatCommandExample(commandPrefix, '1')}；也可以直接回复自定义内容。`);
     return lines.join('\n');
 }
 export function resolveAskUser(payload, questions, choices) {
@@ -225,4 +242,8 @@ function targetKey(target) {
 function cleanupPending(pending) {
     if (pending.signal && pending.onAbort)
         pending.signal.removeEventListener('abort', pending.onAbort);
+}
+function formatCommandExample(commandPrefix, payload) {
+    const prefix = commandPrefix.trim();
+    return prefix ? `${prefix} ${payload}` : payload;
 }

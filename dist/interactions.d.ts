@@ -38,9 +38,13 @@ export interface InteractionCtxLike {
     on?(event: string, cb: (...args: any[]) => unknown, options?: {
         prepend?: boolean;
     }): () => void;
+    inject?(services: readonly string[], cb: (ctx: InteractionCtxLike) => void, label?: string): {
+        dispose(): void;
+    } | void;
+    effect?(cb: () => void | (() => void), label?: string): unknown;
     userQuestions?: UserQuestionsLike;
 }
-interface PendingChoice {
+export interface PendingChoice {
     index: number;
     questionId: string;
     label: string;
@@ -48,11 +52,13 @@ interface PendingChoice {
 /** Routes DSH human-interaction requests through the QQ command channel. */
 export declare class QqInteractionBridge implements PendingReplyHandler {
     private readonly outbound;
+    private readonly commandPrefix;
     private readonly agentTargets;
     private readonly pendingByTarget;
-    constructor(outbound: OutboundSender);
+    constructor(outbound: OutboundSender, commandPrefix?: string);
     bindAgent(sessionKey: string, agent: unknown): void;
     register(ctx: InteractionCtxLike): () => void;
+    private registerUserQuestions;
     handle(ctx: HandlerContext): Promise<boolean>;
     private askApproval;
     private askUser;
@@ -60,8 +66,7 @@ export declare class QqInteractionBridge implements PendingReplyHandler {
     private wait;
     private targetForAgent;
 }
-export declare function formatApprovalRequest(request: ApprovalRequestLike, choices: readonly PendingChoice[]): string;
-export declare function formatAskUserRequest(questions: readonly AskUserQuestionItemLike[], choices: readonly PendingChoice[]): string;
+export declare function formatApprovalRequest(request: ApprovalRequestLike, choices: readonly PendingChoice[], commandPrefix?: string): string;
+export declare function formatAskUserRequest(questions: readonly AskUserQuestionItemLike[], choices: readonly PendingChoice[], commandPrefix?: string): string;
 export declare function resolveAskUser(payload: string, questions: readonly AskUserQuestionItemLike[], choices: readonly PendingChoice[]): AskUserQuestionAnswerLike;
 export declare function resolveApproval(payload: string): ApprovalOutcome;
-export {};

@@ -52,6 +52,12 @@ export interface InteractionCtxLike {
     cb: (...args: any[]) => unknown,
     options?: { prepend?: boolean },
   ): () => void
+  inject?(
+    services: readonly string[],
+    cb: (ctx: InteractionCtxLike) => void,
+    label?: string,
+  ): { dispose(): void } | void
+  effect?(cb: () => void | (() => void), label?: string): unknown
   userQuestions?: UserQuestionsLike
 }
 
@@ -60,7 +66,7 @@ interface QqTarget {
   targetId: MessageTargetId
 }
 
-interface PendingChoice {
+export interface PendingChoice {
   index: number
   questionId: string
   label: string
@@ -90,7 +96,10 @@ export class QqInteractionBridge implements PendingReplyHandler {
   private readonly agentTargets = new WeakMap<object, QqTarget>()
   private readonly pendingByTarget = new Map<string, PendingInteraction>()
 
-  constructor(private readonly outbound: OutboundSender) {}
+  constructor(
+    private readonly outbound: OutboundSender,
+    private readonly commandPrefix = '',
+  ) {}
 
   bindAgent(sessionKey: string, agent: unknown): void {
     if (typeof agent !== 'object' || agent === null) return
@@ -107,18 +116,15 @@ export class QqInteractionBridge implements PendingReplyHandler {
       }, { prepend: true }))
     }
 
-    const userQuestions = ctx.userQuestions
-    if (userQuestions) {
-      const originalAsk = userQuestions.ask.bind(userQuestions)
-      userQuestions.ask = (request) => {
-        if (request.agent !== undefined && this.targetForAgent(request.agent)) {
-          return this.askUser(request)
-        }
-        return originalAsk(request)
+    if (ctx.inject) {
+      const fiber = ctx.inject(['userQuestions'], (childCtx) => {
+        this.registerUserQuestions(childCtx, disposers)
+      }, 'dsh-qq-bridge.userQuestions')
+      if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+        disposers.push(() => fiber.dispose())
       }
-      disposers.push(() => {
-        userQuestions.ask = originalAsk
-      })
+    } else {
+      this.registerUserQuestions(ctx, disposers)
     }
 
     return () => {
@@ -127,6 +133,23 @@ export class QqInteractionBridge implements PendingReplyHandler {
         this.pendingByTarget.delete(key)
         pending.reject(new Error('QQ interaction bridge disposed'))
       }
+    }
+  }
+
+  private registerUserQuestions(ctx: InteractionCtxLike, disposers: Array<() => void>): void {
+    const userQuestions = ctx.userQuestions
+    if (userQuestions) {
+      const originalAsk = userQuestions.ask.bind(userQuestions)
+      const wrappedAsk = (request: AskUserQuestionRequestLike) => {
+        if (request.agent !== undefined && this.targetForAgent(request.agent)) {
+          return this.askUser(request)
+        }
+        return originalAsk(request)
+      }
+      userQuestions.ask = wrappedAsk
+      disposers.push(() => {
+        if (userQuestions.ask === wrappedAsk) userQuestions.ask = originalAsk
+      })
     }
   }
 
@@ -162,7 +185,7 @@ export class QqInteractionBridge implements PendingReplyHandler {
       choices,
       signal: request.signal,
     })
-    await this.sendPrompt(target, formatApprovalRequest(request, choices))
+    await this.sendPrompt(target, formatApprovalRequest(request, choices, this.commandPrefix))
     return await answer
   }
 
@@ -176,7 +199,7 @@ export class QqInteractionBridge implements PendingReplyHandler {
       choices,
       signal: request.signal,
     })
-    await this.sendPrompt(target, formatAskUserRequest(request.questions, choices))
+    await this.sendPrompt(target, formatAskUserRequest(request.questions, choices, this.commandPrefix))
     return await answer
   }
 
@@ -228,7 +251,11 @@ export class QqInteractionBridge implements PendingReplyHandler {
   }
 }
 
-export function formatApprovalRequest(request: ApprovalRequestLike, choices: readonly PendingChoice[]): string {
+export function formatApprovalRequest(
+  request: ApprovalRequestLike,
+  choices: readonly PendingChoice[],
+  commandPrefix = '',
+): string {
   return [
     'Agent 需要确认:',
     `工具: ${request.toolName}`,
@@ -236,13 +263,14 @@ export function formatApprovalRequest(request: ApprovalRequestLike, choices: rea
     '',
     ...choices.map((choice) => `${choice.index}. ${choice.label}`),
     '',
-    '请回复“指令前缀 + 编号”，例如 /dsh 1 或 /dsh 2。',
+    `请回复“指令前缀 + 编号”，例如 ${formatCommandExample(commandPrefix, '1')} 或 ${formatCommandExample(commandPrefix, '2')}。`,
   ].join('\n')
 }
 
 export function formatAskUserRequest(
   questions: readonly AskUserQuestionItemLike[],
   choices: readonly PendingChoice[],
+  commandPrefix = '',
 ): string {
   const lines = ['Agent 需要你的回复:']
   for (const question of questions) {
@@ -254,7 +282,7 @@ export function formatAskUserRequest(
       lines.push(`${choice.index}. ${choice.label}${option?.description ? ` - ${option.description}` : ''}`)
     }
   }
-  lines.push('', '请回复“指令前缀 + 编号”，例如 /dsh 1；也可以直接回复自定义内容。')
+  lines.push('', `请回复“指令前缀 + 编号”，例如 ${formatCommandExample(commandPrefix, '1')}；也可以直接回复自定义内容。`)
   return lines.join('\n')
 }
 
@@ -328,4 +356,9 @@ function targetKey(target: QqTarget): string {
 
 function cleanupPending(pending: PendingInteraction): void {
   if (pending.signal && pending.onAbort) pending.signal.removeEventListener('abort', pending.onAbort)
+}
+
+function formatCommandExample(commandPrefix: string, payload: string): string {
+  const prefix = commandPrefix.trim()
+  return prefix ? `${prefix} ${payload}` : payload
 }

@@ -36,6 +36,7 @@ interface DshCtx extends InteractionCtxLike {
             events: readonly unknown[];
         }>;
     };
+    workspaceRegistry?: DshWorkspaceRegistry;
     on?(event: 'session/event', cb: (subject: DshSessionSubject, event: unknown) => void, options?: {
         prepend?: boolean;
     }): () => void;
@@ -45,6 +46,13 @@ interface DshCtx extends InteractionCtxLike {
     on?(event: string, cb: (...args: never[]) => unknown, options?: {
         prepend?: boolean;
     }): () => void;
+}
+export interface DshWorkspace {
+    id?: string;
+    attachSession(sessionId: string): Promise<void>;
+}
+export interface DshWorkspaceRegistry {
+    create(path: string): Promise<DshWorkspace>;
 }
 interface DshSessionSubject {
     id?: string;
@@ -76,6 +84,7 @@ declare const _default: {
 export default _default;
 /** 判断是否启用 agent 完成后的管理员主动提醒。 */
 export declare function agentReplyNotificationsEnabled(cfg: DshQqBridgeConfig): boolean;
+export declare function attachSessionToWorkspace(registry: DshWorkspaceRegistry, sessionId: string, cwd: string): Promise<void>;
 export declare function createAgentReplyNotifier(ctx: Pick<DshCtx, 'on'>, client: Pick<BridgeChatClient, 'sendPrivate'>, adminTarget: MessageTargetId): () => void;
 /** 监听 DSH 会话完成事件,向管理员 QQ 发送一条轻量提醒。 */
 export declare function registerAgentReplyNotifier(ctx: Pick<DshCtx, 'on'>, client: Pick<BridgeChatClient, 'sendPrivate'>, adminTarget: MessageTargetId): () => void;

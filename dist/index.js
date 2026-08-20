@@ -7,6 +7,8 @@ export { MessageRouter } from './router.js';
 export { AccessGate } from './security.js';
 export { AgentRpcHandler } from './handlers/agent.js';
 export { DshAgentExecutor, extractLastAssistantText, hashKey } from './handlers/dsh-executor.js';
+export { DIR_COMMAND, DirectoryHandler, resolveUserPath } from './handlers/directory.js';
+export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createSetCwdControlHandler, parseQqControlBlocks, } from './handlers/control.js';
 export { ShellHandler } from './handlers/shell.js';
 export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.js';
 export { DshQqBridgeConfig } from './config.js';

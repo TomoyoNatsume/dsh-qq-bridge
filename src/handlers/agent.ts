@@ -1,22 +1,22 @@
 import { Handler, HandlerContext } from '../router.js'
+import { parseQqControlBlocks, QqControlDispatcher } from './control.js'
 
-export const DEFAULT_QQ_MESSAGE_STYLE_PROMPT = [
-  '仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。',
-  '通过 QQ 回复时:',
-  '1. 先给结论。',
-  '2. 回复尽量简明扼要。',
-  '3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。',
-].join('\n')
+export const DEFAULT_QQ_REPLY_STYLE_SKILL_NAME = 'qq-session-reply-style'
 
-export interface QqMessageStyleOptions {
+export interface QqReplyStyleSkillOptions {
   enabled?: boolean
-  prompt?: string
+  skillName?: string
 }
 
-const QQ_SESSION_STYLE_REPEAT_INTERVAL = 30
+const QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL = 30
 
-export interface QqSessionStyleInjection {
-  includeFull: boolean
+export interface QqReplyStyleSkillInjection {
+  invokeSkill: boolean
+  skillName: string
+}
+
+export function sessionKeyOf(ctx: Pick<HandlerContext, 'scope' | 'userId' | 'groupId'>): string {
+  return `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
 }
 
 /**
@@ -72,7 +72,7 @@ export interface AgentExecutor {
  */
 export class AgentRpcHandler implements Handler {
   name = 'agent'
-  private readonly qqStyleTurnCounts = new Map<string, number>()
+  private readonly qqStyleSkillTurnCounts = new Map<string, number>()
 
   constructor(
     private readonly executor: AgentExecutor,
@@ -88,12 +88,19 @@ export class AgentRpcHandler implements Handler {
       timeoutMs?: number
       /** Agent 长时间无响应时回发的消息。 */
       timeoutMessage?: string
-      /** 仅 QQ 入站消息使用的回复风格提示。 */
-      qqMessageStyle?: QqMessageStyleOptions
+      /** 仅 QQ 入站消息使用的回复风格 skill。 */
+      qqReplyStyleSkill?: QqReplyStyleSkillOptions
+      /** 由桥接层自己处理、不应再进入 Agent 的命令前缀。 */
+      reservedCommands?: readonly string[]
+      /** Assistant 输出控制块的执行器。存在时会先解析最终文本再回发。 */
+      controlDispatcher?: QqControlDispatcher
     } = {},
   ) {}
 
   test(payload: string): boolean {
+    if (this.opts.reservedCommands?.some((command) => payload === command || payload.startsWith(`${command} `))) {
+      return false
+    }
     // 默认所有有效载荷都交给 Agent(可扩展:保留特定子命令给其它 handler)。
     // 若不希望 Agent 吞掉所有指令,可改成匹配某前缀,例如 payload 以 `ask ` 开头。
     return true
@@ -107,20 +114,21 @@ export class AgentRpcHandler implements Handler {
   }
 
   async run(ctx: HandlerContext): Promise<void> {
-    const sessionKey = `${ctx.scope}:${ctx.scope === 'private' ? ctx.userId : ctx.groupId}`
-    const sessionStyle = this.nextQqStyleInjection(sessionKey)
-    const payload = formatQqMessageStylePrompt(ctx.payload, this.opts.qqMessageStyle, sessionStyle)
+    const sessionKey = sessionKeyOf(ctx)
+    const styleSkill = this.nextQqStyleSkillInjection(sessionKey)
+    const payload = formatQqReplyStyleSkillPrompt(ctx.payload, styleSkill)
     const ackMessage = this.opts.ackMessage ?? '收到，正在处理...'
     const timeoutMs = this.opts.timeoutMs ?? 120_000
     const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。'
     let active = true
     try {
       if (ackMessage) await this.respondChunk(ctx, ackMessage)
-      if (!this.opts.streamText) {
+      const canStreamText = this.opts.streamText && !this.opts.controlDispatcher
+      if (!canStreamText) {
         // AgentExecutor.run resolve 即本轮完成标志:DSH executor 在内部等待 agent.whenIdle()。
         const result = await withTimeout(this.executor.run(sessionKey, payload), timeoutMs)
         active = false
-        await this.respondChunk(ctx, result || '(no output)')
+        await this.respondAgentOutput(ctx, sessionKey, result || '(no output)')
         return
       }
 
@@ -139,7 +147,7 @@ export class AgentRpcHandler implements Handler {
       // 若流式 text 分段已经覆盖最终结果,不再重复发送最终完整版。
       if (streamedText.join('').trim() === final.trim()) return
       // 最终结果(若与已分段内容不同,回发最终完整版作为收尾;超长自动拆分)。
-      await this.respondChunk(ctx, final)
+      await this.respondAgentOutput(ctx, sessionKey, final)
     } catch (err) {
       active = false
       const message = err instanceof AgentTimeoutError
@@ -149,54 +157,61 @@ export class AgentRpcHandler implements Handler {
     }
   }
 
-  private nextQqStyleInjection(sessionKey: string): QqSessionStyleInjection | undefined {
-    if (!this.opts.qqMessageStyle || this.opts.qqMessageStyle.enabled === false) return undefined
-    const nextTurn = (this.qqStyleTurnCounts.get(sessionKey) ?? 0) + 1
-    this.qqStyleTurnCounts.set(sessionKey, nextTurn)
+  private nextQqStyleSkillInjection(sessionKey: string): QqReplyStyleSkillInjection | undefined {
+    if (!this.opts.qqReplyStyleSkill || this.opts.qqReplyStyleSkill.enabled === false) return undefined
+    const nextTurn = (this.qqStyleSkillTurnCounts.get(sessionKey) ?? 0) + 1
+    this.qqStyleSkillTurnCounts.set(sessionKey, nextTurn)
+    const repeat = nextTurn === 1 || nextTurn % QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL === 0
     return {
-      includeFull: nextTurn === 1 || nextTurn % QQ_SESSION_STYLE_REPEAT_INTERVAL === 0,
+      invokeSkill: repeat,
+      skillName: this.opts.qqReplyStyleSkill.skillName ?? DEFAULT_QQ_REPLY_STYLE_SKILL_NAME,
     }
+  }
+
+  private async respondAgentOutput(ctx: HandlerContext, sessionKey: string, result: string): Promise<void> {
+    const dispatcher = this.opts.controlDispatcher
+    if (!dispatcher) {
+      await this.respondChunk(ctx, result)
+      return
+    }
+
+    const parsed = parseQqControlBlocks(result)
+    let responded = false
+    for (const error of parsed.errors) {
+      responded = true
+      await this.respondChunk(ctx, error)
+    }
+    for (const action of parsed.actions) {
+      const message = await dispatcher.dispatch(action, { sessionKey, source: ctx })
+      if (!message) continue
+      responded = true
+      await this.respondChunk(ctx, message)
+    }
+    if (parsed.visibleText) {
+      responded = true
+      await this.respondChunk(ctx, parsed.visibleText)
+    }
+    if (!responded) await this.respondChunk(ctx, '(no output)')
   }
 }
 
-export function formatQqMessageStylePrompt(
+export function formatQqReplyStyleSkillPrompt(
   payload: string,
-  style?: QqMessageStyleOptions,
-  sessionStyle?: QqSessionStyleInjection,
+  injection?: QqReplyStyleSkillInjection,
 ): string {
-  const sections: string[] = []
-  if (style && style.enabled !== false) {
-    const prompt = (style.prompt ?? DEFAULT_QQ_MESSAGE_STYLE_PROMPT).trim()
-    if (prompt) sections.push(formatQqSessionStyleInjection(sessionStyle ?? { includeFull: true }, prompt))
+  if (!injection) return payload
+  const sections = [
+    '本条用户消息来自 dsh-qq-bridge QQ 会话。',
+    '本次回复使用 QQ Session Temporary Reply Style；这是本次 QQ 会话的临时约束，不要把这条风格约束写入记忆，也不要应用到其它 DSH 会话。',
+  ]
+  if (injection.invokeSkill) {
+    sections.unshift(`/${injection.skillName}`)
   }
-  if (sections.length === 0) return payload
   return [
     ...sections,
     '',
     'User QQ Message:',
     payload,
-  ].join('\n')
-}
-
-function formatQqSessionStyleInjection(
-  sessionStyle: QqSessionStyleInjection | undefined,
-  prompt: string,
-): string {
-  if (!sessionStyle?.includeFull) {
-    return [
-      'QQ Session Temporary Reply Style Reminder:',
-      '本次回复使用QQ Session Temporary Reply Style。',
-    ].join('\n')
-  }
-  return [
-    'QQ Session Temporary Reply Style:',
-    '本次回复使用QQ Session Temporary Reply Style。',
-    '以下内容只是本 QQ 会话的临时回复风格约束,不是用户事实、长期偏好或项目知识。',
-    '不要把这条风格约束写入任何记忆,也不要把它应用到其它会话。',
-    '不得改变系统原本对本次对话内容的记录策略。',
-    '',
-    '固定回复风格规则:',
-    prompt,
   ].join('\n')
 }
 

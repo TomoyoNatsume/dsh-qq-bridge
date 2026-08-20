@@ -9,6 +9,7 @@ export interface BridgeProfileConfig {
   commandPrefix: string
   provider: string
   model: string
+  cwd: string
   selfLogEnabled: boolean
   selfLogPath?: string
 }
@@ -23,6 +24,7 @@ export interface OfficialBridgeProfileConfig {
   commandPrefix: string
   provider: string
   model: string
+  cwd: string
 }
 
 export interface ProfileUpdateResult {
@@ -34,6 +36,7 @@ export interface ProfileUpdateResult {
 
 const BRIDGE_ID = 'dsh-qq-bridge'
 const PERMISSION_ID = 'permission'
+const QQ_BRIDGE_PRESET_ID = 'dsh-qq-bridge'
 
 export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
   const selfLog = cfg.selfLogEnabled
@@ -60,25 +63,21 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     '        access:',
     `          adminQq: ${cfg.adminQq}`,
     '          allowlist: []',
-    `          commandPrefix: ${cfg.commandPrefix}`,
+    `          commandPrefix: ${yamlQuote(cfg.commandPrefix)}`,
     '          mode: whitelist',
     '        agent:',
     `          provider: ${cfg.provider}`,
     `          model: ${cfg.model}`,
-    '          preset: standard',
+    `          cwd: ${yamlQuote(cfg.cwd)}`,
+    `          preset: ${QQ_BRIDGE_PRESET_ID}`,
     '          streamReasoning: false',
     '          maxMessageLength: 4500',
     '          ackMessage: 收到，正在处理...',
     '          timeoutMs: 120000',
     '          timeoutMessage: agent 无响应，请稍后重试。',
-    '          qqMessageStyle:',
+    '          qqReplyStyleSkill:',
     '            enabled: true',
-    '            prompt: |-',
-    '              仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。',
-    '              通过 QQ 回复时:',
-    '              1. 先给结论。',
-    '              2. 回复尽量简明扼要。',
-    '              3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。',
+    '            skillName: qq-session-reply-style',
     '        shell:',
     '          enabled: false',
     ...selfLog,
@@ -100,7 +99,7 @@ export function buildOfficialBridgeInsertItem(cfg: OfficialBridgeProfileConfig):
     '        access:',
     '          adminQq: 0',
     '          allowlist: []',
-    `          commandPrefix: ${cfg.commandPrefix}`,
+    `          commandPrefix: ${yamlQuote(cfg.commandPrefix)}`,
     '          mode: whitelist',
     '        notifications:',
     '          agentReply:',
@@ -108,20 +107,16 @@ export function buildOfficialBridgeInsertItem(cfg: OfficialBridgeProfileConfig):
     '        agent:',
     `          provider: ${cfg.provider}`,
     `          model: ${cfg.model}`,
-    '          preset: standard',
+    `          cwd: ${yamlQuote(cfg.cwd)}`,
+    `          preset: ${QQ_BRIDGE_PRESET_ID}`,
     '          streamReasoning: false',
     '          maxMessageLength: 4500',
     '          ackMessage: 收到，正在处理...',
     '          timeoutMs: 120000',
     '          timeoutMessage: agent 无响应，请稍后重试。',
-    '          qqMessageStyle:',
+    '          qqReplyStyleSkill:',
     '            enabled: true',
-    '            prompt: |-',
-    '              仅本次 QQ 对话适用:不要写入记忆系统,不要作为全局偏好,不要影响其它 DSH 对话。',
-    '              通过 QQ 回复时:',
-    '              1. 先给结论。',
-    '              2. 回复尽量简明扼要。',
-    '              3. 不使用 Markdown 风格,用纯文本回复；可以多用 emoji。',
+    '            skillName: qq-session-reply-style',
     '        shell:',
     '          enabled: false',
     '        selfLogInput:',

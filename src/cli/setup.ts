@@ -12,6 +12,7 @@ import {
 } from './dsh-profile.js'
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from './dsh-settings.js'
 import { createOfficialPairCode, pairOfficialAdmin } from './official-pairing.js'
+import { installQqBridgePreset } from './qq-preset.js'
 import {
   canAcceptUserConfirmedLogin,
   classifyNapcatLogin,
@@ -37,6 +38,7 @@ interface CommonSetupAnswers {
   commandPrefix: string
   model: string
   dshCheckout: string
+  agentCwd: string
   permissionDefault: PermissionDefaultChoice
 }
 
@@ -127,7 +129,7 @@ async function runNapcatSetup(prompt: Prompter): Promise<void> {
     answers.dshCheckout,
     () => printVerifyGuidance(answers),
     () => printVerifyGuidance(answers, '启动后'),
-    `如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`,
+    `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`,
     '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。',
   )
 }
@@ -160,7 +162,7 @@ async function runOfficialSetup(prompt: Prompter): Promise<void> {
   console.log('确认机器人应用已创建，并准备好 AppID / AppSecret 后继续。\n')
   const answers = await collectOfficialAnswers(prompt)
   const pairCode = createOfficialPairCode()
-  const pairCommand = `${answers.commandPrefix} pair ${pairCode}`
+  const pairCommand = formatCommandExample(answers.commandPrefix, `pair ${pairCode}`)
 
   console.log('\n开始配对腾讯官方 QQ Bot。')
   console.log('setup 会临时连接 QQBot 网关，收到一次性配对口令后自动读取你的 openid。')
@@ -182,7 +184,7 @@ async function runOfficialSetup(prompt: Prompter): Promise<void> {
     answers.dshCheckout,
     () => printOfficialVerifyGuidance(answers),
     () => printOfficialVerifyGuidance(answers, '启动后'),
-    `如果发送 ${answers.commandPrefix} ping 后没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。`,
+    `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。`,
     '如果没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。',
   )
 }
@@ -205,15 +207,20 @@ async function collectOfficialAnswers(prompt: Prompter): Promise<OfficialSetupAn
 }
 
 async function collectCommonAnswers(prompt: Prompter): Promise<CommonSetupAnswers> {
-  const commandPrefix = await prompt.text('设置发送指令时的前缀', '/dsh')
+  const commandPrefix = await prompt.text('设置发送指令时的前缀（默认空: 不需要前缀，白名单用户的所有消息都会进入 Agent）', '')
   const model = await prompt.choice('选择模型', ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash')
   const dshCheckout = await promptExistingDirectory(
     prompt,
     'DSH / deepseek-harness 目录',
     process.env.DSH_CHECKOUT ?? join(homedir(), 'deepseek-harness'),
   )
+  const agentCwd = await promptExistingDirectory(
+    prompt,
+    'QQ Agent 默认工作目录',
+    '~',
+  )
   const permissionDefault = await promptPermissionDefault(prompt)
-  return { commandPrefix, model, dshCheckout, permissionDefault }
+  return { commandPrefix, model, dshCheckout, agentCwd, permissionDefault }
 }
 
 async function promptRequiredText(prompt: Prompter, label: string): Promise<string> {
@@ -267,6 +274,8 @@ async function resolveNapcatRoot(prompt: Prompter): Promise<string> {
 
 async function configureDshProfile(answers: SetupAnswers, logPath: string, token: string): Promise<void> {
   const profilePath = join(resolveDshHome(), 'profiles', 'web', 'cordis.patch.yml')
+  const preset = await installQqBridgePreset(resolveDshHome())
+  console.log(`\n已同步 QQ 专用 agent preset: ${preset.targetDir}`)
   const pluginName = fileURLToPath(new URL('../index.js', import.meta.url))
   const item = buildBridgeInsertItem({
     pluginName,
@@ -276,6 +285,7 @@ async function configureDshProfile(answers: SetupAnswers, logPath: string, token
     commandPrefix: answers.commandPrefix,
     provider: 'deepseek-official',
     model: answers.model,
+    cwd: answers.agentCwd,
     selfLogEnabled: answers.selfLogEnabled,
     selfLogPath: answers.selfLogEnabled ? logPath : undefined,
   })
@@ -290,6 +300,8 @@ async function configureDshProfile(answers: SetupAnswers, logPath: string, token
 
 async function configureOfficialDshProfile(answers: OfficialSetupAnswers, adminOpenId: string): Promise<void> {
   const profilePath = join(resolveDshHome(), 'profiles', 'web', 'cordis.patch.yml')
+  const preset = await installQqBridgePreset(resolveDshHome())
+  console.log(`\n已同步 QQ 专用 agent preset: ${preset.targetDir}`)
   const pluginName = fileURLToPath(new URL('../index.js', import.meta.url))
   const item = buildOfficialBridgeInsertItem({
     pluginName,
@@ -301,6 +313,7 @@ async function configureOfficialDshProfile(answers: OfficialSetupAnswers, adminO
     commandPrefix: answers.commandPrefix,
     provider: 'deepseek-official',
     model: answers.model,
+    cwd: answers.agentCwd,
   })
   const previous = await readFile(profilePath, 'utf8').catch(() => '[]\n')
   const update = updateSetupProfilePatch(previous, item)
@@ -531,14 +544,19 @@ function restartNapcatForQr(qq: number): void {
 
 function printVerifyGuidance(answers: SetupAnswers, prefix = '请'): void {
   if (answers.selfLogEnabled) {
-    console.log(`${prefix}在 QQ 给自己发送: ${answers.commandPrefix} ping`)
+    console.log(`${prefix}在 QQ 给自己发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`)
     return
   }
-  console.log(`${prefix}用 QQ ${answers.senderQq} 给 QQ ${answers.napcatQq} 发送: ${answers.commandPrefix} ping`)
+  console.log(`${prefix}用 QQ ${answers.senderQq} 给 QQ ${answers.napcatQq} 发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`)
 }
 
 function printOfficialVerifyGuidance(answers: OfficialSetupAnswers, prefix = '请'): void {
-  console.log(`${prefix}用刚才配对的 QQ 给官方机器人发送: ${answers.commandPrefix} ping`)
+  console.log(`${prefix}用刚才配对的 QQ 给官方机器人发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`)
+}
+
+function formatCommandExample(commandPrefix: string, payload: string): string {
+  const prefix = commandPrefix.trim()
+  return prefix ? `${prefix} ${payload}` : payload
 }
 
 function printSetupRefreshGuidance(): void {

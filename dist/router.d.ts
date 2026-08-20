@@ -16,6 +16,8 @@ export interface Handler {
     name: string;
     /** 是否愿意处理这条 message(如按 payload 命令名匹配) */
     test(payload: string): boolean;
+    /** 命中后是否继续尝试后续 handler。默认 false,命令 handler 会独占消费。 */
+    continueAfterRun?: boolean;
     run(ctx: HandlerContext): Promise<void>;
 }
 export interface PendingReplyHandler {
@@ -36,7 +38,7 @@ export declare class MessageRouter {
      * 处理一条入站消息:
      * 1. 白名单过滤
      * 2. 前缀剥离
-     * 3. 匹配 handler 并执行
+     * 3. 按注册顺序匹配 handler。
      * 返回是否被消费(被 router 处理且至少一个 handler 匹配)。
      */
     route(evt: OnebotMessageEvent): Promise<boolean>;

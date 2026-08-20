@@ -19,10 +19,12 @@ export class AccessGate {
     }
     /**
      * 剥离指令前缀,返回剩余有效载荷;若不以前缀开头返回 null。
-     * 这样消息必须显式以 '/dsh' 开头才被处理(避免打扰其他 QQ 用法)。
+     * commandPrefix 为空时返回整条消息,由白名单决定是否放行。
      */
     stripPrefix(text) {
         const trimmed = text.trim();
+        if (this.opts.commandPrefix === '')
+            return trimmed;
         if (!trimmed.startsWith(this.opts.commandPrefix))
             return null;
         return trimmed.slice(this.opts.commandPrefix.length).trim();

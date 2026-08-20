@@ -63,7 +63,7 @@ export interface DshRenderedAgent {
  */
 export interface DshServiceHandles {
   /** 按 sessionKey 获取(已有)或创建(miss)一个 live agent。 */
-  getOrCreate(options: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent>
+  getOrCreate(options: { sessionKey: string; sessionId: string; cwd?: string }): Promise<DshRenderedAgent>
   /**
    * 投递用户消息并等待本轮完成。
    * @param onChunk 可选分段回调:agent 产出过程中的文本增量,便于流式回发。
@@ -88,6 +88,8 @@ export interface DshServiceHandles {
 export class DshAgentExecutor implements AgentExecutor {
   private agents = new Map<string, DshRenderedAgent>()
   private sessions = new Map<string, string>() // sessionKey -> sessionId
+  private sessionCwds = new Map<string, string>()
+  private sessionVersions = new Map<string, number>()
   private queues = new Map<string, Promise<void>>()
   /**
    * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -96,7 +98,10 @@ export class DshAgentExecutor implements AgentExecutor {
    */
   private readonly bootSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-  constructor(private readonly dsh: DshServiceHandles) {}
+  constructor(
+    private readonly dsh: DshServiceHandles,
+    private readonly opts: { defaultCwd?: string } = {},
+  ) {}
 
   async run(
     sessionKey: string,
@@ -116,12 +121,16 @@ export class DshAgentExecutor implements AgentExecutor {
     onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
   ): Promise<string> {
     const sessionIdExists = this.sessions.get(sessionKey)
-    const sessionId = sessionIdExists ?? `qq-${hashKey(sessionKey)}-${this.bootSuffix}`
+    const sessionId = sessionIdExists ?? this.createSessionId(sessionKey)
     this.sessions.set(sessionKey, sessionId)
 
     let agent = this.agents.get(sessionKey)
     if (!agent) {
-      agent = await this.dsh.getOrCreate({ sessionKey, sessionId })
+      agent = await this.dsh.getOrCreate({
+        sessionKey,
+        sessionId,
+        cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
+      })
       this.agents.set(sessionKey, agent)
     }
 
@@ -169,17 +178,36 @@ export class DshAgentExecutor implements AgentExecutor {
     this.queues.delete(sessionKey)
   }
 
+  /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
+  async setCwd(sessionKey: string, cwd: string): Promise<void> {
+    this.sessionCwds.set(sessionKey, cwd)
+    this.sessionVersions.set(sessionKey, (this.sessionVersions.get(sessionKey) ?? 0) + 1)
+    await this.disposeSession(sessionKey)
+  }
+
+  /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */
+  getCwd(sessionKey: string): string {
+    return this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd ?? process.cwd()
+  }
+
   /** 释放全部 live agent(插件 teardown 时调用)。 */
   async disposeAll(): Promise<void> {
     const agents = [...this.agents.values()]
     this.agents.clear()
     this.sessions.clear()
+    this.sessionCwds.clear()
+    this.sessionVersions.clear()
     this.queues.clear()
     await Promise.all(agents.map((a) => a.dispose()))
   }
 
   get liveSessionCount(): number {
     return this.agents.size
+  }
+
+  private createSessionId(sessionKey: string): string {
+    const version = this.sessionVersions.get(sessionKey) ?? 0
+    return `qq-${hashKey(sessionKey)}-${this.bootSuffix}-${version}`
   }
 }
 

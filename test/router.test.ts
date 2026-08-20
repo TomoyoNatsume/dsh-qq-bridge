@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { MessageRouter } from '../src/router.js'
 import { AccessGate } from '../src/security.js'
-import { AgentRpcHandler, formatQqMessageStylePrompt, splitText } from '../src/handlers/agent.js'
+import { AgentRpcHandler, formatQqReplyStyleSkillPrompt, splitText } from '../src/handlers/agent.js'
+import { DirectoryHandler } from '../src/handlers/directory.js'
+import { createSetCwdControlHandler, QqControlDispatcher } from '../src/handlers/control.js'
 import { ShellHandler } from '../src/handlers/shell.js'
 import { OnebotMessageEvent } from '../src/onebot/types.js'
 
@@ -41,22 +43,26 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(sent).toEqual(['收到，正在处理...', 'echo:hello world'])
   })
 
-  it('QQ style prompt 只在显式启用时包装 agent payload', async () => {
-    expect(formatQqMessageStylePrompt('hello')).toBe('hello')
+  it('QQ style skill 只在显式启用时包装 agent payload', async () => {
+    expect(formatQqReplyStyleSkillPrompt('hello')).toBe('hello')
 
     const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
     const executor = { run: vi.fn(async () => 'ok') }
     const sent: string[] = []
     const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
     router.register(new AgentRpcHandler(executor, {
-      qqMessageStyle: { enabled: true },
+      qqReplyStyleSkill: { enabled: true },
     }))
 
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello' }))
 
     expect(executor.run).toHaveBeenCalledWith(
       'private:10001',
-      expect.stringContaining('QQ Session Temporary Reply Style:\n本次回复使用QQ Session Temporary Reply Style'),
+      expect.stringContaining('/qq-session-reply-style'),
+    )
+    expect(executor.run).toHaveBeenCalledWith(
+      'private:10001',
+      expect.stringContaining('本条用户消息来自 dsh-qq-bridge QQ 会话。'),
     )
     expect(executor.run).toHaveBeenCalledWith(
       'private:10001',
@@ -65,14 +71,14 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(sent).toEqual(['收到，正在处理...', 'ok'])
   })
 
-  it('默认 QQ 回复风格按会话回合注入短提示与完整规则', async () => {
+  it('默认 QQ 回复风格 skill 按会话回合主动调用', async () => {
     const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
     const executor = { run: vi.fn(async () => 'ok') }
     const sent: string[] = []
     const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
     router.register(new AgentRpcHandler(executor, {
       ackMessage: '',
-      qqMessageStyle: { enabled: true },
+      qqReplyStyleSkill: { enabled: true },
     }))
 
     for (let i = 1; i <= 30; i++) {
@@ -82,11 +88,11 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const firstPayload = executor.run.mock.calls[0]?.[1]
     const secondPayload = executor.run.mock.calls[1]?.[1]
     const thirtiethPayload = executor.run.mock.calls[29]?.[1]
-    expect(firstPayload).toContain('本次回复使用QQ Session Temporary Reply Style')
-    expect(firstPayload).toContain('固定回复风格规则:\n仅本次 QQ 对话适用')
-    expect(secondPayload).toContain('本次回复使用QQ Session Temporary Reply Style')
-    expect(secondPayload).not.toContain('固定回复风格规则')
-    expect(thirtiethPayload).toContain('固定回复风格规则:\n仅本次 QQ 对话适用')
+    expect(firstPayload).toContain('/qq-session-reply-style')
+    expect(firstPayload).toContain('本次回复使用 QQ Session Temporary Reply Style')
+    expect(secondPayload).toContain('本次回复使用 QQ Session Temporary Reply Style')
+    expect(secondPayload).not.toContain('/qq-session-reply-style')
+    expect(thirtiethPayload).toContain('/qq-session-reply-style')
 
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh style 请用别的风格' }))
     expect(executor.run.mock.calls.at(-1)?.[1]).toContain('User QQ Message:\nstyle 请用别的风格')
@@ -117,6 +123,55 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const consumed = await router.route(makeEvent({ user_id: 10001, raw_message: 'some normal chat' }))
     expect(consumed).toBe(false)
     expect(run).not.toHaveBeenCalled()
+  })
+
+  it('commandPrefix 为空时白名单用户普通消息直接进入 agent', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const run = vi.fn(async (_k: string, p: string) => `r:${p}`)
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '' }))
+
+    const consumed = await router.route(makeEvent({ user_id: 10001, raw_message: '当前目录是什么' }))
+
+    expect(consumed).toBe(true)
+    expect(run).toHaveBeenCalledWith('private:10001', '当前目录是什么')
+    expect(sent).toEqual(['r:当前目录是什么'])
+  })
+
+  it('/dir 切换工作区后不会再进入 agent handler', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const setCwd = vi.fn(async () => {})
+    const run = vi.fn(async () => 'agent should not run')
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new DirectoryHandler({ setCwd }))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '' }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dir /tmp' }))
+
+    expect(setCwd).toHaveBeenCalledWith('private:10001', '/tmp')
+    expect(run).not.toHaveBeenCalled()
+    expect(sent).toEqual(['已切换当前 QQ 会话工作区: /tmp\n下一条消息会使用新的 Agent session。'])
+  })
+
+  it('agent 输出 set_cwd 控制块时执行切目录且不回发原始控制块', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const setCwd = vi.fn(async () => {})
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSetCwdControlHandler({ setCwd }))
+    const run = vi.fn(async () => (
+      '<dsh-qq-bridge-control>{"action":"set_cwd","path":"/tmp"}</dsh-qq-bridge-control>'
+    ))
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '', controlDispatcher: dispatcher }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '帮我把工作目录改到 /tmp' }))
+
+    expect(setCwd).toHaveBeenCalledWith('private:10001', '/tmp')
+    expect(sent).toEqual(['已切换当前 QQ 会话工作区: /tmp\n下一条消息会使用新的 Agent session。'])
+    expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
   })
 
   it('group 消息同样受白名单与前缀约束', async () => {

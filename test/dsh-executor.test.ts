@@ -7,16 +7,28 @@ function surfaceEvent(type: string, content: unknown[]) {
 
 interface MockState {
   createCalls: string[]
+  createCwds: Array<string | undefined>
+  createSessionIds: string[]
   drops: string[]
 }
 
 /** 内存 mock:按 sessionId 记录创建/释放,readSurface 返回固定 surface 序列。 */
 function makeMock(repliesBySession: Record<string, unknown[]>) {
   const live = new Map<string, DshRenderedAgent>()
-  const state: MockState = { createCalls: [], drops: [] }
+  const state: MockState = { createCalls: [], createCwds: [], createSessionIds: [], drops: [] }
   const dsh = {
-    async getOrCreate({ sessionKey, sessionId }: { sessionKey: string; sessionId: string }): Promise<DshRenderedAgent> {
+    async getOrCreate({
+      sessionKey,
+      sessionId,
+      cwd,
+    }: {
+      sessionKey: string
+      sessionId: string
+      cwd?: string
+    }): Promise<DshRenderedAgent> {
       state.createCalls.push(sessionKey)
+      state.createCwds.push(cwd)
+      state.createSessionIds.push(sessionId)
       const agent: DshRenderedAgent = {
         followup: vi.fn(),
         async whenIdle() {},
@@ -92,6 +104,29 @@ describe('dsh-qq-bridge — DshAgentExecutor(多轮上下文)', () => {
     await exec.disposeSession('private:10001')
     expect(exec.liveSessionCount).toBe(1)
     expect(state.drops.some((s) => s.startsWith(sid))).toBe(true)
+  })
+
+  it('setCwd 释放当前会话,并让下一轮用新目录创建新 session', async () => {
+    const { dsh, state } = makeMock({})
+    const exec = new DshAgentExecutor(dsh as never, { defaultCwd: '/default' })
+
+    await exec.run('private:10001', 'before')
+    await exec.setCwd('private:10001', '/tmp')
+    await exec.run('private:10001', 'after')
+
+    expect(state.createCalls).toEqual(['private:10001', 'private:10001'])
+    expect(state.createCwds).toEqual(['/default', '/tmp'])
+    expect(state.createSessionIds[0]).not.toBe(state.createSessionIds[1])
+    expect(state.drops).toContain(state.createSessionIds[0])
+  })
+
+  it('getCwd 返回当前 session cwd,未切换时使用默认目录', async () => {
+    const { dsh } = makeMock({})
+    const exec = new DshAgentExecutor(dsh as never, { defaultCwd: '/default' })
+
+    expect(exec.getCwd('private:10001')).toBe('/default')
+    await exec.setCwd('private:10001', '/tmp')
+    expect(exec.getCwd('private:10001')).toBe('/tmp')
   })
 
   it('并发消息按 sessionKey 串行,不并驱同一会话', async () => {

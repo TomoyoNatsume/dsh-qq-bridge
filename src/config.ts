@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DEFAULT_QQ_MESSAGE_STYLE_PROMPT } from './handlers/agent.js'
+import { DEFAULT_QQ_REPLY_STYLE_SKILL_NAME } from './handlers/agent.js'
 
 const DshQqBridgeConfig = z.object({
   platform: z.enum(['napcat', 'official']).default('napcat'),
@@ -27,18 +27,20 @@ const DshQqBridgeConfig = z.object({
     .object({
       adminQq: z.number(),
       allowlist: z.array(z.number()).default([]),
-      commandPrefix: z.string().default('/dsh'),
+      commandPrefix: z.string().default(''),
       mode: z.enum(['whitelist', 'open']).default('whitelist'),
     })
     .default({ adminQq: 0 }),
   agent: z
     .object({
-      /** DSH Web 的 agent preset;存在 agentPresets 服务时默认挂 standard。 */
-      preset: z.string().optional().default('standard'),
+      /** DSH Web 的 agent preset;存在 agentPresets 服务时默认挂 QQ bridge 专用 preset。 */
+      preset: z.string().optional().default('dsh-qq-bridge'),
       /** 驱动 agent 的 provider 路由(须有已注册适配器)。 */
       provider: z.string().default('deepseek-official'),
       /** 驱动 agent 的模型 id(provider 适配器解释)。 */
       model: z.string().default('deepseek-v4-flash'),
+      /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
+      cwd: z.string().optional(),
       /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
       streamText: z.boolean().default(false),
       /** streamText=true 时,是否把思考过程(reasoning)也分段回发。默认 false。 */
@@ -51,11 +53,11 @@ const DshQqBridgeConfig = z.object({
       timeoutMs: z.number().int().positive().default(120_000),
       /** Agent 长时间无响应时回发的消息。 */
       timeoutMessage: z.string().default('agent 无响应，请稍后重试。'),
-      /** 仅 QQ 入站消息使用的回复风格提示,不会影响其它 DSH 会话。 */
-      qqMessageStyle: z
+      /** 仅 QQ 入站消息使用的回复风格 skill,不会影响其它 DSH 会话。 */
+      qqReplyStyleSkill: z
         .object({
           enabled: z.boolean().default(true),
-          prompt: z.string().default(DEFAULT_QQ_MESSAGE_STYLE_PROMPT),
+          skillName: z.string().default(DEFAULT_QQ_REPLY_STYLE_SKILL_NAME),
         })
         .default({}),
     })
