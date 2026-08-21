@@ -16,8 +16,12 @@ export { DshAgentExecutor, extractLastAssistantText, hashKey } from './handlers/
 export type { DshRenderedAgent } from './handlers/dsh-executor.js';
 export { DIR_COMMAND, DirectoryHandler, resolveUserPath } from './handlers/directory.js';
 export type { DirectorySwitcher } from './handlers/directory.js';
-export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createSetCwdControlHandler, parseQqControlBlocks, } from './handlers/control.js';
+export { BridgeControlHandler, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, ModelControlHandler, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, installBridgeModelSelection, resolveConfiguredModels, } from './handlers/model-control.js';
+export type { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, ModelSelectionController, PermissionController, } from './handlers/model-control.js';
+export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, parseQqControlBlocks, } from './handlers/control.js';
 export type { ParsedQqControls, QqControlAction, QqControlActionHandler, QqControlContext, } from './handlers/control.js';
+export { InMemoryTaskScheduler, createScheduleTaskControlHandler, } from './handlers/scheduler.js';
+export type { InMemoryTaskSchedulerOptions, ScheduledTask, ScheduledTaskController, ScheduledTaskReceipt, ScheduledTaskTarget, } from './handlers/scheduler.js';
 export { ShellHandler } from './handlers/shell.js';
 export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.js';
 export { DshQqBridgeConfig } from './config.js';

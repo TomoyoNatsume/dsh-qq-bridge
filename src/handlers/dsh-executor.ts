@@ -1,4 +1,12 @@
 import { AgentExecutor } from './agent.js'
+import {
+  BridgeModelInfo,
+  BridgeModelSelection,
+  BridgeModelSelectionRef,
+  ModelSelectionController,
+  PermissionController,
+  resolveConfiguredModels,
+} from './model-control.js'
 
 /**
  * 提取 session surface 中最后一条 assistant 消息的纯文本。
@@ -55,7 +63,11 @@ export interface DshRenderedAgent {
   readSurface?(): Promise<readonly unknown[]>
   /** 销毁该会话底层的 DSH agent(释放资源)。 */
   dispose(): Promise<void>
+  /** 原始 DSH agent 对象;需要调用 host 原生命令服务时使用。 */
+  _commandAgent?: unknown
 }
+
+export type DshCommandExecutor = (agent: unknown, line: string) => Promise<string | undefined>
 
 /**
  * DSH 服务句柄 —— 由插件注入,mock 可注入。
@@ -63,7 +75,12 @@ export interface DshRenderedAgent {
  */
 export interface DshServiceHandles {
   /** 按 sessionKey 获取(已有)或创建(miss)一个 live agent。 */
-  getOrCreate(options: { sessionKey: string; sessionId: string; cwd?: string }): Promise<DshRenderedAgent>
+  getOrCreate(options: {
+    sessionKey: string
+    sessionId: string
+    cwd?: string
+    modelSelection: BridgeModelSelectionRef
+  }): Promise<DshRenderedAgent>
   /**
    * 投递用户消息并等待本轮完成。
    * @param onChunk 可选分段回调:agent 产出过程中的文本增量,便于流式回发。
@@ -85,11 +102,13 @@ export interface DshServiceHandles {
  * - disposeAll() 在插件 teardown 时释放全部 live agent。
  * - disposeSession() 可主动丢弃某个会话(如错误恢复、会话上限)。
  */
-export class DshAgentExecutor implements AgentExecutor {
+export class DshAgentExecutor implements AgentExecutor, PermissionController {
   private agents = new Map<string, DshRenderedAgent>()
   private sessions = new Map<string, string>() // sessionKey -> sessionId
   private sessionCwds = new Map<string, string>()
   private sessionVersions = new Map<string, number>()
+  private sessionSelections = new Map<string, BridgeModelSelection>()
+  private selectionRefs = new Map<string, BridgeModelSelectionRef>()
   private queues = new Map<string, Promise<void>>()
   /**
    * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -100,7 +119,15 @@ export class DshAgentExecutor implements AgentExecutor {
 
   constructor(
     private readonly dsh: DshServiceHandles,
-    private readonly opts: { defaultCwd?: string } = {},
+    private readonly opts: {
+      defaultCwd?: string
+      defaultProvider?: string
+      defaultModel?: string
+      models?: readonly string[]
+      resolveModelSelection?: (selection: BridgeModelSelection) => Promise<BridgeModelSelection>
+      listModels?: (provider: string) => Promise<BridgeModelInfo[]>
+      executeCommand?: DshCommandExecutor
+    } = {},
   ) {}
 
   async run(
@@ -108,11 +135,7 @@ export class DshAgentExecutor implements AgentExecutor {
     payload: string,
     onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
   ): Promise<string> {
-    const prev = this.queues.get(sessionKey) ?? Promise.resolve()
-    const next = prev.then(() => this.runNow(sessionKey, payload, onChunk))
-    // 吞掉队列尾部错误,避免串行链断掉后续消息
-    this.queues.set(sessionKey, next.then(() => undefined, () => undefined))
-    return next
+    return await this.enqueue(sessionKey, () => this.runNow(sessionKey, payload, onChunk))
   }
 
   private async runNow(
@@ -120,19 +143,7 @@ export class DshAgentExecutor implements AgentExecutor {
     payload: string,
     onChunk?: (text: string, kind: 'text' | 'reasoning') => void,
   ): Promise<string> {
-    const sessionIdExists = this.sessions.get(sessionKey)
-    const sessionId = sessionIdExists ?? this.createSessionId(sessionKey)
-    this.sessions.set(sessionKey, sessionId)
-
-    let agent = this.agents.get(sessionKey)
-    if (!agent) {
-      agent = await this.dsh.getOrCreate({
-        sessionKey,
-        sessionId,
-        cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
-      })
-      this.agents.set(sessionKey, agent)
-    }
+    const { agent, sessionId } = await this.getOrCreateSessionAgent(sessionKey)
 
     await this.dsh.deliver(agent, payload, onChunk)
     const events = await this.readEvents(agent, sessionId)
@@ -158,6 +169,16 @@ export class DshAgentExecutor implements AgentExecutor {
     return text ?? '(agent produced no text)'
   }
 
+  async runPermissionCommand(sessionKey: string, preset?: string): Promise<string> {
+    return await this.enqueue(sessionKey, async () => {
+      if (!this.opts.executeCommand) return '当前 host 不支持权限切换。'
+      const { agent } = await this.getOrCreateSessionAgent(sessionKey)
+      const line = preset?.trim() ? `/permission ${preset.trim()}` : '/permission'
+      const text = await this.opts.executeCommand(agent._commandAgent ?? agent, line)
+      return text ?? '当前 host 不支持权限切换。'
+    })
+  }
+
   /** 优先读 live agent 的实时会话日志,缺省则退回持久化 surface。 */
   private async readEvents(agent: DshRenderedAgent, sessionId: string): Promise<readonly unknown[]> {
     if (typeof agent.readSurface === 'function') {
@@ -176,6 +197,41 @@ export class DshAgentExecutor implements AgentExecutor {
     }
     this.sessions.delete(sessionKey)
     this.queues.delete(sessionKey)
+  }
+
+  getModelSelection(sessionKey: string): BridgeModelSelection {
+    return this.selectionRef(sessionKey).current
+  }
+
+  async selectModel(sessionKey: string, model: string): Promise<BridgeModelSelection> {
+    const current = this.getModelSelection(sessionKey)
+    const selected = await this.resolveSelection({
+      provider: current.provider,
+      model,
+    })
+    this.setSelection(sessionKey, selected)
+    return selected
+  }
+
+  async selectReasoningEffort(sessionKey: string, effort: string): Promise<BridgeModelSelection> {
+    const current = this.getModelSelection(sessionKey)
+    const selected = await this.resolveSelection({
+      provider: current.provider,
+      model: current.model,
+      reasoningEffort: effort,
+    })
+    this.setSelection(sessionKey, selected)
+    return selected
+  }
+
+  async listModels(sessionKey: string): Promise<BridgeModelInfo[]> {
+    const provider = this.getModelSelection(sessionKey).provider
+    if (this.opts.listModels) {
+      const models = await this.opts.listModels(provider)
+      if (models.length > 0) return models
+    }
+    return resolveConfiguredModels(this.opts.defaultModel ?? 'deepseek-v4-flash', this.opts.models)
+      .map(id => ({ provider, id, name: id }))
   }
 
   /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
@@ -197,6 +253,8 @@ export class DshAgentExecutor implements AgentExecutor {
     this.sessions.clear()
     this.sessionCwds.clear()
     this.sessionVersions.clear()
+    this.sessionSelections.clear()
+    this.selectionRefs.clear()
     this.queues.clear()
     await Promise.all(agents.map((a) => a.dispose()))
   }
@@ -205,9 +263,62 @@ export class DshAgentExecutor implements AgentExecutor {
     return this.agents.size
   }
 
+  private async enqueue<T>(sessionKey: string, task: () => Promise<T>): Promise<T> {
+    const prev = this.queues.get(sessionKey) ?? Promise.resolve()
+    const next = prev.then(task)
+    // 吞掉队列尾部错误,避免串行链断掉后续消息
+    this.queues.set(sessionKey, next.then(() => undefined, () => undefined))
+    return await next
+  }
+
+  private async getOrCreateSessionAgent(sessionKey: string): Promise<{ agent: DshRenderedAgent; sessionId: string }> {
+    const sessionIdExists = this.sessions.get(sessionKey)
+    const sessionId = sessionIdExists ?? this.createSessionId(sessionKey)
+    this.sessions.set(sessionKey, sessionId)
+
+    let agent = this.agents.get(sessionKey)
+    if (!agent) {
+      agent = await this.dsh.getOrCreate({
+        sessionKey,
+        sessionId,
+        cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
+        modelSelection: this.selectionRef(sessionKey),
+      })
+      this.agents.set(sessionKey, agent)
+    }
+    return { agent, sessionId }
+  }
+
   private createSessionId(sessionKey: string): string {
     const version = this.sessionVersions.get(sessionKey) ?? 0
     return `qq-${hashKey(sessionKey)}-${this.bootSuffix}-${version}`
+  }
+
+  private selectionRef(sessionKey: string): BridgeModelSelectionRef {
+    const existing = this.selectionRefs.get(sessionKey)
+    if (existing) return existing
+    const ref: BridgeModelSelectionRef = {
+      current: this.sessionSelections.get(sessionKey) ?? this.defaultSelection(),
+    }
+    this.selectionRefs.set(sessionKey, ref)
+    return ref
+  }
+
+  private setSelection(sessionKey: string, selection: BridgeModelSelection): void {
+    this.sessionSelections.set(sessionKey, selection)
+    this.selectionRef(sessionKey).current = selection
+  }
+
+  private async resolveSelection(selection: BridgeModelSelection): Promise<BridgeModelSelection> {
+    if (this.opts.resolveModelSelection) return await this.opts.resolveModelSelection(selection)
+    return selection
+  }
+
+  private defaultSelection(): BridgeModelSelection {
+    return {
+      provider: this.opts.defaultProvider ?? 'deepseek-official',
+      model: this.opts.defaultModel ?? 'deepseek-v4-flash',
+    }
   }
 }
 

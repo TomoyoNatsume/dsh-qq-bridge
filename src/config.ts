@@ -39,6 +39,8 @@ const DshQqBridgeConfig = z.object({
       provider: z.string().default('deepseek-official'),
       /** 驱动 agent 的模型 id(provider 适配器解释)。 */
       model: z.string().default('deepseek-v4-flash'),
+      /** 当 DSH llm 服务不可用时,bridge 侧 /models 的降级候选列表。 */
+      models: z.array(z.string()).default([]),
       /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
       cwd: z.string().optional(),
       /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */

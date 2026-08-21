@@ -13,7 +13,7 @@
 
 <div align="center">
 
-[是什么](#是什么) · [功能](#功能) · [快速开始](#快速开始) · [配置](#配置) · [安全](#安全) · [停止服务](#停止服务) · [常见问题](#常见问题) · [许可与致谢](#许可与致谢)
+[更新](#更新) · [是什么](#是什么) · [功能](#功能) · [快速开始](#快速开始) · [配置](#配置) · [安全](#安全) · [停止服务](#停止服务) · [常见问题](#常见问题) · [许可与致谢](#许可与致谢)
 
 </div>
 
@@ -30,6 +30,12 @@
 <sub>QQ 远程控制 · Agent 回复提醒 · NapCat / 官方 QQ Bot 双路径</sub>
 
 </div>
+
+## 更新
+
+> **v0.4.0 更新：支持定时提示功能!**
+>
+> 直接在 QQ 里对 Agent 说“请在 2026 年 9 月 1 号中午 12 点提醒我提交报告”，插件会创建一次性定时任务，到点后在同一个 QQ 会话触发 Agent 并主动发回提醒。
 
 ## 是什么
 
@@ -65,16 +71,15 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 ```text
 当前工作目录是什么
-列出当前目录下的文件
-/dir /home/xxx/project
 帮我把工作目录改到 /home/xxx/project
+请在 2026 年 9 月 1 号中午 12 点提醒我提交报告
 ```
 
-插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀为空，白名单用户的所有消息都会进入 Agent；可在 `access.commandPrefix` 中改回 `/dsh`、`/ai` 等前缀。`/dir <目录>` 是内置控制命令，用来切换当前 QQ 会话的工作区，目录存在时下一条消息会使用新的 Agent session，并通过 DSH workspaceRegistry 归类到 Web UI 对应工作区。
+插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀为空，白名单用户的所有消息都会进入 Agent；可在 `access.commandPrefix` 中改回 `/dsh`、`/ai` 等前缀。`/dir <目录>` 是内置控制命令，用来切换当前 QQ 会话的工作区，目录存在时下一条消息会使用新的 Agent session，并通过 DSH workspaceRegistry 归类到 Web UI 对应工作区。`/models`、`/model <模型名>`、`/reasoningEff <等级>`、`/permission [preset]`、`/permissions` 和 `/help` 是 bridge 侧控制命令，不经过 Agent；模型和推理等级切换会按 Web UI 的 model selection 机制在下一次模型请求生效，正在运行的请求不受影响。权限切换会调用 DSH 原生 `/permission` command，作用于当前 QQ 会话的 live session。
 
-如果你用自然语言要求 Agent 切换工作目录，QQ 专用 preset 会让 Agent 输出私有控制块；插件会拦截并执行 `set_cwd`，不会把控制块内容发回 QQ。后续切换效果与 `/dir <目录>` 一致。
+如果你用自然语言要求 Agent 切换工作目录、模型、推理等级、权限，或创建一次性定时任务，QQ 专用 preset 会让 Agent 输出私有控制块；插件会拦截并执行 `set_cwd`、`set_model`、`set_reasoning_effort`、`set_permission` 或 `schedule_task`，不会把控制块内容发回 QQ。定时任务使用插件内存 timer，到点后会在同一个 QQ 会话触发 Agent 并主动发回 QQ；重启 DSH/插件后未触发的定时任务会丢失。
 
-内置控制命令会优先于 Agent 消息处理。后续新增 `/xxx` 指令时，只需要注册新的 handler 并放在 Agent fallback 前面；命中后会独占消费，不会把控制命令误发给 Agent。
+内置控制命令统一由 bridge control handler 管理，并优先于 Agent 消息处理。后续新增 `/xxx` 指令时，应挂到同一个 bridge control handler；命中后会独占消费，不会把控制命令误发给 Agent。
 
 ### NapCat / OneBot 默认路径
 
@@ -200,6 +205,7 @@ setup 会按你选择的接入方式完成配置：
 - NapCat 路径会校验 QQ 号、DSH 项目目录、NapCat 根目录、模型、单号/双号模式。
 - NapCat 路径会检查 `napcat status <QQ>`，未启动时自动执行 `napcat start <QQ>`。
 - NapCat 路径会配置 OneBot 正向 WebSocket：`127.0.0.1:3001`。
+- NapCat 路径会在配置后检查 OneBot WS 是否可连接；如果 NapCat 已退出或端口未监听，会写入 profile 但跳过后台启动 DSH web。
 - 官方 QQ Bot 路径会要求先创建机器人，输入 AppID、AppSecret、沙箱开关，并通过 `pair <code>` 自动配置 `adminOpenId`。
 - 可选更新 `~/.dsh/settings.yaml` 的 `permission.defaultPreset`。
 - 可选后台启动 DSH web。
@@ -220,7 +226,12 @@ ping
 当前工作目录是什么
 列出当前工作目录下的目录和文件
 /dir /home/xxx/project
+/models
+/model deepseek-v4-pro
+/reasoningEff high
+/permission workspace-write
 帮我把工作目录改到 /home/xxx/project
+请在 2026 年 9 月 1 号中午 12 点提醒我提交报告
 ```
 
 如果是自己前台启动的 DSH web，启动成功后会看到类似界面：
@@ -228,6 +239,31 @@ ping
 <p align="center">
   <img src="docs/asset/test0.png" alt="DSH 启动成功截图" width="760">
 </p>
+
+## 指令
+
+默认 `commandPrefix: ""` 时，白名单用户可直接发送下面的 bridge 侧指令；如果配置了 `/dsh`、`/ai` 等前缀，则需要写成 `/dsh /dir /home/xxx/project` 这种形式。bridge 侧指令不会进入 Agent。
+
+| 指令 | 示例 | 作用 | 作用范围 |
+| --- | --- | --- | --- |
+| `/help` | `/help` | 查看 bridge 侧控制指令说明。 | 当前 QQ 会话 |
+| `/dir <目录>` | `/dir /home/xxx/project` | 切换当前 QQ 会话工作目录；目录存在时下一条消息会使用新的 Agent session。 | 当前 QQ 会话 |
+| `/models` | `/models` | 列出当前 provider 可用模型。 | 当前 QQ 会话 |
+| `/model <模型名>` | `/model deepseek-v4-pro` | 切换当前 QQ 会话模型；模型名必须和 `/models` 列出的 id 完全一致。 | 当前 QQ 会话 |
+| `/reasoningEff <等级>` | `/reasoningEff high` | 切换当前 QQ 会话推理等级。 | 当前 QQ 会话 |
+| `/permission` | `/permission` | 查看当前权限 preset 和可用 preset。 | 当前 QQ live session |
+| `/permissions` | `/permissions` | 同 `/permission`，用于查看权限 preset。 | 当前 QQ live session |
+| `/permission <preset>` | `/permission workspace-write` | 调用 DSH 原生 `/permission` command 切换当前 live session 权限。 | 当前 QQ live session |
+
+QQ 专用 Agent preset 还支持自然语言控制。Agent 会输出私有 `<dsh-qq-bridge-control>...</dsh-qq-bridge-control>`，插件拦截后执行，不会把控制块内容发回 QQ。
+
+| 用户说法示例 | Agent 控制动作 | 作用 |
+| --- | --- | --- |
+| `帮我把工作目录改到 /home/xxx/project` | `set_cwd` | 与 `/dir <目录>` 一致，切换当前 QQ 会话工作目录。 |
+| `把模型改成 deepseek-v4-pro` | `set_model` | 与 `/model <模型名>` 一致，动态切换当前 QQ 会话模型。 |
+| `推理等级改成 high` | `set_reasoning_effort` | 与 `/reasoningEff <等级>` 一致，动态切换当前 QQ 会话推理等级。 |
+| `权限改成 workspace-write` | `set_permission` | 与 `/permission <preset>` 一致，切换当前 QQ live session 权限。 |
+| `请在 2026 年 9 月 1 号中午 12 点提醒我提交报告` | `schedule_task` | 创建一次性插件内存 timer；到点后在同一个 QQ 会话触发 Agent 并主动发回 QQ。重启后未触发任务会丢失。 |
 
 ## 配置
 
@@ -432,6 +468,8 @@ permission:
 
 - `workspace-write`：较安全。Agent 只能写工作区和允许的临时目录，越权操作需要网页端审批。
 - `danger-full-access`：最省心但风险最高。Agent 可直接访问本机进程权限能访问的路径，且不会弹出审批。
+
+这里配置的是 DSH 后续新会话的默认权限；QQ 里发送 `/permission <preset>` 会通过 DSH 原生命令切换当前 QQ live session 的权限，不会改写 `settings.yaml`。
 - 保持现有 settings：setup 不修改 DSH 全局默认权限。
 
 这个默认值只影响之后新建的 Web 会话，不改变已经打开的会话。
@@ -465,7 +503,7 @@ echo: ping
 
 ### 指令入口
 
-默认 `commandPrefix: ""`，白名单用户的普通消息会直接进入 DSH。设置为 `/dsh`、`/ai` 等非空值后，只有以该前缀开头的消息才会进入 DSH。`/dir <目录>` 是内置工作区切换命令，默认空前缀时可直接发送。
+默认 `commandPrefix: ""`，白名单用户的普通消息会直接进入 DSH。设置为 `/dsh`、`/ai` 等非空值后，只有以该前缀开头的消息才会进入 DSH。`/dir <目录>`、`/models`、`/model <模型名>`、`/reasoningEff <等级>`、`/permission [preset]`、`/permissions`、`/help` 是内置 bridge 控制命令，默认空前缀时可直接发送。
 
 ### OneBot 只监听本机
 

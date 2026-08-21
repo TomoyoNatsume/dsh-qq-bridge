@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { WebSocket } from 'ws';
 export function defaultNapcatRootPath() {
     return join(homedir(), 'Napcat');
 }
@@ -32,6 +33,22 @@ export async function updateOnebotConfigFile(path) {
     if (update.changed)
         await writeFile(path, update.content, 'utf8');
     return update;
+}
+export async function waitForOnebotWsEndpoint(options) {
+    const timeoutMs = options.timeoutMs ?? 15000;
+    const retryIntervalMs = options.retryIntervalMs ?? 800;
+    const deadline = Date.now() + timeoutMs;
+    let lastReason = 'timeout';
+    while (Date.now() <= deadline) {
+        const result = await probeOnebotWsEndpoint(options.wsUrl, options.token, Math.min(2500, Math.max(500, deadline - Date.now())));
+        if (result.ok)
+            return result;
+        lastReason = result.reason ?? lastReason;
+        if (Date.now() >= deadline)
+            break;
+        await sleep(Math.min(retryIntervalMs, Math.max(0, deadline - Date.now())));
+    }
+    return { ok: false, reason: lastReason };
 }
 export function updateOnebotConfig(raw) {
     const json = JSON.parse(raw);
@@ -147,6 +164,38 @@ function firstWebSocketServer(json) {
         return null;
     return servers[0];
 }
+function probeOnebotWsEndpoint(wsUrl, token, timeoutMs) {
+    return new Promise((resolve) => {
+        let settled = false;
+        let ws;
+        const finish = (result) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+                ws?.close();
+            }
+            catch { /* noop */ }
+            resolve(result);
+        };
+        const timer = setTimeout(() => finish({ ok: false, reason: `connect timeout after ${timeoutMs}ms` }), timeoutMs);
+        try {
+            const authToken = token?.trim();
+            ws = new WebSocket(wsUrl, {
+                headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+            });
+        }
+        catch (err) {
+            finish({ ok: false, reason: err instanceof Error ? err.message : String(err) });
+            return;
+        }
+        ws.once('open', () => finish({ ok: true }));
+        ws.once('error', (err) => finish({ ok: false, reason: err instanceof Error ? err.message : String(err) }));
+        ws.once('unexpected-response', (_req, res) => finish({ ok: false, reason: `HTTP ${res.statusCode}` }));
+        ws.once('close', () => finish({ ok: false, reason: 'socket closed before open' }));
+    });
+}
 function isRecord(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -155,4 +204,7 @@ function randomToken() {
 }
 function matchesAny(text, needles) {
     return needles.some((needle) => text.includes(needle));
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }

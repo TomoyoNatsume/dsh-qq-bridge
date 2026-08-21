@@ -1,3 +1,4 @@
+import { resolveConfiguredModels, } from './model-control.js';
 /**
  * 提取 session surface 中最后一条 assistant 消息的纯文本。
  *
@@ -50,6 +51,8 @@ export class DshAgentExecutor {
     sessions = new Map(); // sessionKey -> sessionId
     sessionCwds = new Map();
     sessionVersions = new Map();
+    sessionSelections = new Map();
+    selectionRefs = new Map();
     queues = new Map();
     /**
      * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -62,25 +65,10 @@ export class DshAgentExecutor {
         this.opts = opts;
     }
     async run(sessionKey, payload, onChunk) {
-        const prev = this.queues.get(sessionKey) ?? Promise.resolve();
-        const next = prev.then(() => this.runNow(sessionKey, payload, onChunk));
-        // 吞掉队列尾部错误,避免串行链断掉后续消息
-        this.queues.set(sessionKey, next.then(() => undefined, () => undefined));
-        return next;
+        return await this.enqueue(sessionKey, () => this.runNow(sessionKey, payload, onChunk));
     }
     async runNow(sessionKey, payload, onChunk) {
-        const sessionIdExists = this.sessions.get(sessionKey);
-        const sessionId = sessionIdExists ?? this.createSessionId(sessionKey);
-        this.sessions.set(sessionKey, sessionId);
-        let agent = this.agents.get(sessionKey);
-        if (!agent) {
-            agent = await this.dsh.getOrCreate({
-                sessionKey,
-                sessionId,
-                cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
-            });
-            this.agents.set(sessionKey, agent);
-        }
+        const { agent, sessionId } = await this.getOrCreateSessionAgent(sessionKey);
         await this.dsh.deliver(agent, payload, onChunk);
         const events = await this.readEvents(agent, sessionId);
         const text = extractLastAssistantText(events);
@@ -106,6 +94,16 @@ export class DshAgentExecutor {
         }
         return text ?? '(agent produced no text)';
     }
+    async runPermissionCommand(sessionKey, preset) {
+        return await this.enqueue(sessionKey, async () => {
+            if (!this.opts.executeCommand)
+                return '当前 host 不支持权限切换。';
+            const { agent } = await this.getOrCreateSessionAgent(sessionKey);
+            const line = preset?.trim() ? `/permission ${preset.trim()}` : '/permission';
+            const text = await this.opts.executeCommand(agent._commandAgent ?? agent, line);
+            return text ?? '当前 host 不支持权限切换。';
+        });
+    }
     /** 优先读 live agent 的实时会话日志,缺省则退回持久化 surface。 */
     async readEvents(agent, sessionId) {
         if (typeof agent.readSurface === 'function') {
@@ -125,6 +123,38 @@ export class DshAgentExecutor {
         this.sessions.delete(sessionKey);
         this.queues.delete(sessionKey);
     }
+    getModelSelection(sessionKey) {
+        return this.selectionRef(sessionKey).current;
+    }
+    async selectModel(sessionKey, model) {
+        const current = this.getModelSelection(sessionKey);
+        const selected = await this.resolveSelection({
+            provider: current.provider,
+            model,
+        });
+        this.setSelection(sessionKey, selected);
+        return selected;
+    }
+    async selectReasoningEffort(sessionKey, effort) {
+        const current = this.getModelSelection(sessionKey);
+        const selected = await this.resolveSelection({
+            provider: current.provider,
+            model: current.model,
+            reasoningEffort: effort,
+        });
+        this.setSelection(sessionKey, selected);
+        return selected;
+    }
+    async listModels(sessionKey) {
+        const provider = this.getModelSelection(sessionKey).provider;
+        if (this.opts.listModels) {
+            const models = await this.opts.listModels(provider);
+            if (models.length > 0)
+                return models;
+        }
+        return resolveConfiguredModels(this.opts.defaultModel ?? 'deepseek-v4-flash', this.opts.models)
+            .map(id => ({ provider, id, name: id }));
+    }
     /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
     async setCwd(sessionKey, cwd) {
         this.sessionCwds.set(sessionKey, cwd);
@@ -142,15 +172,65 @@ export class DshAgentExecutor {
         this.sessions.clear();
         this.sessionCwds.clear();
         this.sessionVersions.clear();
+        this.sessionSelections.clear();
+        this.selectionRefs.clear();
         this.queues.clear();
         await Promise.all(agents.map((a) => a.dispose()));
     }
     get liveSessionCount() {
         return this.agents.size;
     }
+    async enqueue(sessionKey, task) {
+        const prev = this.queues.get(sessionKey) ?? Promise.resolve();
+        const next = prev.then(task);
+        // 吞掉队列尾部错误,避免串行链断掉后续消息
+        this.queues.set(sessionKey, next.then(() => undefined, () => undefined));
+        return await next;
+    }
+    async getOrCreateSessionAgent(sessionKey) {
+        const sessionIdExists = this.sessions.get(sessionKey);
+        const sessionId = sessionIdExists ?? this.createSessionId(sessionKey);
+        this.sessions.set(sessionKey, sessionId);
+        let agent = this.agents.get(sessionKey);
+        if (!agent) {
+            agent = await this.dsh.getOrCreate({
+                sessionKey,
+                sessionId,
+                cwd: this.sessionCwds.get(sessionKey) ?? this.opts.defaultCwd,
+                modelSelection: this.selectionRef(sessionKey),
+            });
+            this.agents.set(sessionKey, agent);
+        }
+        return { agent, sessionId };
+    }
     createSessionId(sessionKey) {
         const version = this.sessionVersions.get(sessionKey) ?? 0;
         return `qq-${hashKey(sessionKey)}-${this.bootSuffix}-${version}`;
+    }
+    selectionRef(sessionKey) {
+        const existing = this.selectionRefs.get(sessionKey);
+        if (existing)
+            return existing;
+        const ref = {
+            current: this.sessionSelections.get(sessionKey) ?? this.defaultSelection(),
+        };
+        this.selectionRefs.set(sessionKey, ref);
+        return ref;
+    }
+    setSelection(sessionKey, selection) {
+        this.sessionSelections.set(sessionKey, selection);
+        this.selectionRef(sessionKey).current = selection;
+    }
+    async resolveSelection(selection) {
+        if (this.opts.resolveModelSelection)
+            return await this.opts.resolveModelSelection(selection);
+        return selection;
+    }
+    defaultSelection() {
+        return {
+            provider: this.opts.defaultProvider ?? 'deepseek-official',
+            model: this.opts.defaultModel ?? 'deepseek-v4-flash',
+        };
     }
 }
 /** 确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */

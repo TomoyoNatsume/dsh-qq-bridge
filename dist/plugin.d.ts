@@ -1,3 +1,4 @@
+import { BridgeModelSelection } from './handlers/model-control.js';
 import { DshQqBridgeConfig } from './config.js';
 import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js';
 import type { MessageTargetId } from './onebot/types.js';
@@ -37,6 +38,8 @@ interface DshCtx extends InteractionCtxLike {
         }>;
     };
     workspaceRegistry?: DshWorkspaceRegistry;
+    llm?: DshLlmRuntime;
+    commands?: DshCommandRuntime;
     on?(event: 'session/event', cb: (subject: DshSessionSubject, event: unknown) => void, options?: {
         prepend?: boolean;
     }): () => void;
@@ -46,6 +49,39 @@ interface DshCtx extends InteractionCtxLike {
     on?(event: string, cb: (...args: never[]) => unknown, options?: {
         prepend?: boolean;
     }): () => void;
+}
+interface DshLlmRuntime {
+    listProviders?(): Array<{
+        id: string;
+        name?: string;
+    }>;
+    listModels?(provider: string): Promise<Array<{
+        provider?: string;
+        id: string;
+        name?: string;
+    }>>;
+    resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<{
+        provider?: string;
+        id?: string;
+        name?: string;
+        reasoning?: {
+            efforts: ReadonlyArray<{
+                id: string;
+                name?: string;
+                description?: string;
+            }>;
+            defaultEffort?: string;
+        };
+    }>;
+    resolveCallConfig?(config: BridgeModelSelection, signal?: AbortSignal): Promise<BridgeModelSelection>;
+}
+interface DshCommandRuntime {
+    execute(agent: unknown, line: string, images: readonly unknown[], signal: AbortSignal): Promise<undefined | {
+        result?: {
+            kind?: string;
+            text?: string;
+        };
+    }>;
 }
 export interface DshWorkspace {
     id?: string;

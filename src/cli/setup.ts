@@ -27,12 +27,14 @@ import {
   type NapcatRuntimeState,
   tryReadOnebotToken,
   updateOnebotConfigFile,
+  waitForOnebotWsEndpoint,
 } from './napcat.js'
 import { isPromptCancelledError, parseQq, Prompter } from './prompt.js'
 import { startDshWebBackground } from './dsh-runner.js'
 
 type SetupPlatformChoice = 'NapCat / OneBot' | '腾讯官方 QQ Bot'
 type PermissionDefaultChoice = 'workspace-write' | 'danger-full-access' | '保持现有 settings.yaml'
+const ONEBOT_WS_URL = 'ws://127.0.0.1:3001'
 
 interface CommonSetupAnswers {
   commandPrefix: string
@@ -47,6 +49,11 @@ interface SetupAnswers extends CommonSetupAnswers {
   senderQq: number
   selfLogEnabled: boolean
   napcatRoot: string
+}
+
+interface NapcatSetupResult {
+  token: string
+  onebotReady: boolean
 }
 
 interface OfficialSetupAnswers extends CommonSetupAnswers {
@@ -116,14 +123,20 @@ async function runNapcatSetup(prompt: Prompter): Promise<void> {
   const answers = await collectAnswers(prompt)
   const logPath = defaultNapcatLogPath(answers.napcatQq, answers.napcatRoot)
 
-  const token = await configureNapcatEnvironment(prompt, answers.napcatQq, answers.napcatRoot)
-  if (!token) {
-    console.log('\n未能取得 OneBot token。请在 NapCat WebUI 配好正向 WebSocket 后重新运行 setup。')
+  const napcat = await configureNapcatEnvironment(prompt, answers.napcatQq, answers.napcatRoot)
+  if (!napcat) {
+    console.log('\n未能完成 NapCat / OneBot 配置。请在 NapCat WebUI 配好正向 WebSocket 后重新运行 setup。')
     process.exitCode = 1
     return
   }
-  await configureDshProfile(answers, logPath, token)
+  await configureDshProfile(answers, logPath, napcat.token)
   await configureDshSettings(answers.permissionDefault)
+  if (!napcat.onebotReady) {
+    console.log('\n已写入 DSH profile，但 OneBot WS 当前不可连接，因此跳过启动 DSH web。')
+    printNapcatRecoveryGuidance(answers.napcatQq)
+    process.exitCode = 1
+    return
+  }
   await maybeStartDshWeb(
     prompt,
     answers.dshCheckout,
@@ -279,7 +292,7 @@ async function configureDshProfile(answers: SetupAnswers, logPath: string, token
   const pluginName = fileURLToPath(new URL('../index.js', import.meta.url))
   const item = buildBridgeInsertItem({
     pluginName,
-    wsUrl: 'ws://127.0.0.1:3001',
+    wsUrl: ONEBOT_WS_URL,
     token,
     adminQq: answers.senderQq,
     commandPrefix: answers.commandPrefix,
@@ -388,7 +401,7 @@ async function maybeStartDshWeb(
   }
 }
 
-async function configureNapcatEnvironment(prompt: Prompter, qq: number, napcatRoot: string): Promise<string | null> {
+async function configureNapcatEnvironment(prompt: Prompter, qq: number, napcatRoot: string): Promise<NapcatSetupResult | null> {
   const onebotPath = defaultOnebotConfigPath(qq, napcatRoot)
 
   console.log('\n第一步: 配置 NapCat 环境')
@@ -404,7 +417,22 @@ async function configureNapcatEnvironment(prompt: Prompter, qq: number, napcatRo
 
   await waitForNapcatLogin(prompt, qq, napcatRoot, status)
 
-  return prepareOnebot(prompt, onebotPath)
+  const token = await prepareOnebot(prompt, onebotPath)
+  if (!token) return null
+
+  console.log(`\n检查 OneBot WS 是否可连接: ${ONEBOT_WS_URL}`)
+  const endpoint = await waitForOnebotWsEndpoint({
+    wsUrl: ONEBOT_WS_URL,
+    token,
+    timeoutMs: 15000,
+  })
+  if (endpoint.ok) {
+    console.log('OneBot WS 连接检查通过。')
+    return { token, onebotReady: true }
+  }
+
+  console.warn(`OneBot WS 连接检查失败: ${endpoint.reason ?? 'unknown error'}`)
+  return { token, onebotReady: false }
 }
 
 async function prepareOnebot(prompt: Prompter, configPath: string): Promise<string | null> {
@@ -532,6 +560,15 @@ function printNapcatLogGuidance(qq: number, napcatRoot: string, state: NapcatLog
   }
   console.log(`查看命令: napcat log ${qq}`)
   console.log(`持续查看: tail -f ${logPath}`)
+}
+
+function printNapcatRecoveryGuidance(qq: number): void {
+  console.log('请先让 NapCat 稳定运行，再启动或重启 DSH web。常用命令:')
+  console.log(`  napcat status ${qq}`)
+  console.log(`  napcat start ${qq}`)
+  console.log(`  napcat log ${qq}`)
+  console.log(`确认日志中出现 OneBot WebSocket 服务已启动后，再运行: dsh-qq-bridge setup`)
+  console.log('如果日志中出现 Electron / X connection / FATAL，请先处理 NapCat 进程崩溃或图形环境问题。')
 }
 
 function restartNapcatForQr(qq: number): void {

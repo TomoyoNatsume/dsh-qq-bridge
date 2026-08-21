@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { WebSocketServer } from 'ws'
 import {
   canAcceptUserConfirmedLogin,
   classifyNapcatLogin,
@@ -8,6 +9,7 @@ import {
   defaultNapcatLogPath,
   defaultOnebotConfigPath,
   updateOnebotConfig,
+  waitForOnebotWsEndpoint,
 } from '../src/cli/napcat.js'
 
 describe('setup NapCat OneBot config updater', () => {
@@ -51,6 +53,31 @@ describe('setup NapCat OneBot config updater', () => {
     expect(() => updateOnebotConfig(JSON.stringify({
       network: { websocketServers: ['bad'] },
     }))).toThrow(/server entry/)
+  })
+
+  it('checks a local OneBot websocket endpoint with bearer token', async () => {
+    let authorization: string | undefined
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    server.on('connection', (socket, req) => {
+      authorization = req.headers.authorization
+      socket.close()
+    })
+    await new Promise<void>((resolve) => server.once('listening', resolve))
+    const address = server.address()
+    if (typeof address === 'string' || address === null) throw new Error('expected tcp address')
+
+    const result = await waitForOnebotWsEndpoint({
+      wsUrl: `ws://127.0.0.1:${address.port}`,
+      token: 'secret-token',
+      timeoutMs: 1000,
+      retryIntervalMs: 50,
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => err ? reject(err) : resolve())
+    })
+    expect(result.ok).toBe(true)
+    expect(authorization).toBe('Bearer secret-token')
   })
 })
 

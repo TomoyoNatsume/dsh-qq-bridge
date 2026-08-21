@@ -62,6 +62,8 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         provider: z.ZodDefault<z.ZodString>;
         /** 驱动 agent 的模型 id(provider 适配器解释)。 */
         model: z.ZodDefault<z.ZodString>;
+        /** 当 DSH llm 服务不可用时,bridge 侧 /models 的降级候选列表。 */
+        models: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
         /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
         cwd: z.ZodOptional<z.ZodString>;
         /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
@@ -88,9 +90,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
             skillName?: string | undefined;
         }>>;
     }, "strip", z.ZodTypeAny, {
+        model: string;
         preset: string;
         provider: string;
-        model: string;
+        models: string[];
         streamText: boolean;
         streamReasoning: boolean;
         maxMessageLength: number;
@@ -103,9 +106,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         };
         cwd?: string | undefined;
     }, {
+        model?: string | undefined;
         preset?: string | undefined;
         provider?: string | undefined;
-        model?: string | undefined;
+        models?: string[] | undefined;
         cwd?: string | undefined;
         streamText?: boolean | undefined;
         streamReasoning?: boolean | undefined;
@@ -172,9 +176,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         sandbox: boolean;
     };
     agent: {
+        model: string;
         preset: string;
         provider: string;
-        model: string;
+        models: string[];
         streamText: boolean;
         streamReasoning: boolean;
         maxMessageLength: number;
@@ -222,9 +227,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         sandbox?: boolean | undefined;
     } | undefined;
     agent?: {
+        model?: string | undefined;
         preset?: string | undefined;
         provider?: string | undefined;
-        model?: string | undefined;
+        models?: string[] | undefined;
         cwd?: string | undefined;
         streamText?: boolean | undefined;
         streamReasoning?: boolean | undefined;

@@ -2,8 +2,15 @@ import { describe, it, expect, vi } from 'vitest'
 import { MessageRouter } from '../src/router.js'
 import { AccessGate } from '../src/security.js'
 import { AgentRpcHandler, formatQqReplyStyleSkillPrompt, splitText } from '../src/handlers/agent.js'
-import { DirectoryHandler } from '../src/handlers/directory.js'
-import { createSetCwdControlHandler, QqControlDispatcher } from '../src/handlers/control.js'
+import {
+  createSetCwdControlHandler,
+  createSetModelControlHandler,
+  createSetPermissionControlHandler,
+  createSetReasoningEffortControlHandler,
+  QqControlDispatcher,
+} from '../src/handlers/control.js'
+import { createScheduleTaskControlHandler } from '../src/handlers/scheduler.js'
+import { BridgeControlHandler } from '../src/handlers/model-control.js'
 import { ShellHandler } from '../src/handlers/shell.js'
 import { OnebotMessageEvent } from '../src/onebot/types.js'
 
@@ -145,7 +152,16 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     const run = vi.fn(async () => 'agent should not run')
     const sent: string[] = []
     const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
-    router.register(new DirectoryHandler({ setCwd }))
+    router.register(new BridgeControlHandler({
+      getModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
+      listModels: async () => [],
+      selectModel: async (_sessionKey, model) => ({ provider: 'deepseek-official', model }),
+      selectReasoningEffort: async (_sessionKey, reasoningEffort) => ({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-flash',
+        reasoningEffort,
+      }),
+    }, { setCwd }))
     router.register(new AgentRpcHandler({ run } as never, { ackMessage: '' }))
 
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dir /tmp' }))
@@ -153,6 +169,45 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(setCwd).toHaveBeenCalledWith('private:10001', '/tmp')
     expect(run).not.toHaveBeenCalled()
     expect(sent).toEqual(['已切换当前 QQ 会话工作区: /tmp\n下一条消息会使用新的 Agent session。'])
+  })
+
+  it('bridge 模型控制命令直接处理,不会进入 agent handler', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const run = vi.fn(async () => 'agent should not run')
+    const sent: string[] = []
+    const controller = {
+      getModelSelection: vi.fn(() => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })),
+      listModels: vi.fn(async () => [
+        { provider: 'deepseek-official', id: 'deepseek-v4-flash', name: 'Flash' },
+        { provider: 'deepseek-official', id: 'deepseek-v4-pro', name: 'Pro', reasoningEfforts: ['off', 'low', 'high'] },
+      ]),
+      selectModel: vi.fn(async () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'high' })),
+      selectReasoningEffort: vi.fn(async () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'low' })),
+    }
+    const permission = {
+      runPermissionCommand: vi.fn(async (_sessionKey: string, preset?: string) => (
+        preset ? `权限命令执行成功: preset ${preset}` : '权限命令执行成功: current preset workspace-write'
+      )),
+    }
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new BridgeControlHandler(controller, { setCwd: vi.fn(async () => {}) }, permission))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '' }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/models' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/model deepseek-v4-pro' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/reasoningEff low' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/permission workspace-write' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/permissions' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/help' }))
+
+    expect(run).not.toHaveBeenCalled()
+    expect(controller.selectModel).toHaveBeenCalledWith('private:10001', 'deepseek-v4-pro')
+    expect(controller.selectReasoningEffort).toHaveBeenCalledWith('private:10001', 'low')
+    expect(permission.runPermissionCommand).toHaveBeenCalledWith('private:10001', 'workspace-write')
+    expect(permission.runPermissionCommand).toHaveBeenCalledWith('private:10001', undefined)
+    expect(sent.join('\n')).toContain('deepseek-v4-pro')
+    expect(sent.join('\n')).toContain('/reasoningEff <等级>')
+    expect(sent.join('\n')).toContain('/permission [preset]')
   })
 
   it('agent 输出 set_cwd 控制块时执行切目录且不回发原始控制块', async () => {
@@ -171,6 +226,100 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
 
     expect(setCwd).toHaveBeenCalledWith('private:10001', '/tmp')
     expect(sent).toEqual(['已切换当前 QQ 会话工作区: /tmp\n下一条消息会使用新的 Agent session。'])
+    expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
+  })
+
+  it('agent 输出模型控制块时执行同一套 bridge 控制逻辑且不回发原始控制块', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const controller = {
+      getModelSelection: vi.fn(() => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })),
+      listModels: vi.fn(async () => [
+        {
+          provider: 'deepseek-official',
+          id: 'deepseek-v4-pro',
+          reasoningEfforts: ['off', 'low', 'high', 'max'],
+        },
+      ]),
+      selectModel: vi.fn(async (_sessionKey: string, model: string) => ({
+        provider: 'deepseek-official',
+        model,
+        reasoningEffort: 'high',
+      })),
+      selectReasoningEffort: vi.fn(async (_sessionKey: string, reasoningEffort: string) => ({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-pro',
+        reasoningEffort,
+      })),
+    }
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSetModelControlHandler(controller))
+    dispatcher.register(createSetReasoningEffortControlHandler(controller))
+    const run = vi.fn(async () => [
+      '<dsh-qq-bridge-control>{"action":"set_model","model":"deepseek-v4-pro"}</dsh-qq-bridge-control>',
+      '<dsh-qq-bridge-control>{"action":"set_reasoning_effort","reasoningEffort":"low"}</dsh-qq-bridge-control>',
+    ].join('\n'))
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '', controlDispatcher: dispatcher }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '把模型改成 deepseek-v4-pro，推理等级改 low' }))
+
+    expect(controller.selectModel).toHaveBeenCalledWith('private:10001', 'deepseek-v4-pro')
+    expect(controller.selectReasoningEffort).toHaveBeenCalledWith('private:10001', 'low')
+    expect(sent.join('\n')).toContain('已切换模型: deepseek-v4-pro')
+    expect(sent.join('\n')).toContain('reasoningEffort: low')
+    expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
+  })
+
+  it('agent 输出权限控制块时执行同一套 bridge 控制逻辑且不回发原始控制块', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const permission = {
+      runPermissionCommand: vi.fn(async (_sessionKey: string, preset?: string) => (
+        `权限命令执行成功: preset ${preset}`
+      )),
+    }
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSetPermissionControlHandler(permission))
+    const run = vi.fn(async () => (
+      '<dsh-qq-bridge-control>{"action":"set_permission","preset":"workspace-write"}</dsh-qq-bridge-control>'
+    ))
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '', controlDispatcher: dispatcher }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '把权限改成 workspace-write' }))
+
+    expect(permission.runPermissionCommand).toHaveBeenCalledWith('private:10001', 'workspace-write')
+    expect(sent).toEqual(['权限命令执行成功: preset workspace-write'])
+    expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
+  })
+
+  it('agent 输出定时任务控制块时创建插件内任务且不回发原始控制块', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const scheduler = {
+      scheduleTask: vi.fn(async () => ({
+        id: 'task-1',
+        runAtText: '2026-09-01T12:00:00+08:00',
+      })),
+    }
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createScheduleTaskControlHandler(scheduler))
+    const run = vi.fn(async () => (
+      '<dsh-qq-bridge-control>{"action":"schedule_task","runAt":"2026-09-01T12:00:00+08:00","message":"提醒我提交报告"}</dsh-qq-bridge-control>'
+    ))
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '', controlDispatcher: dispatcher }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '请在 2026 年 9 月 1 号中午 12 点提醒我提交报告' }))
+
+    expect(scheduler.scheduleTask).toHaveBeenCalledWith({
+      sessionKey: 'private:10001',
+      source: expect.objectContaining({ userId: 10001, scope: 'private' }),
+      runAt: '2026-09-01T12:00:00+08:00',
+      message: '提醒我提交报告',
+    })
+    expect(sent).toEqual(['已创建定时任务: 2026-09-01T12:00:00+08:00\n到点后会在当前 QQ 会话触发 Agent。'])
     expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
   })
 

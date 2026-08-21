@@ -1,4 +1,5 @@
 import { AgentExecutor } from './agent.js';
+import { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, PermissionController } from './model-control.js';
 /**
  * 提取 session surface 中最后一条 assistant 消息的纯文本。
  *
@@ -30,7 +31,10 @@ export interface DshRenderedAgent {
     readSurface?(): Promise<readonly unknown[]>;
     /** 销毁该会话底层的 DSH agent(释放资源)。 */
     dispose(): Promise<void>;
+    /** 原始 DSH agent 对象;需要调用 host 原生命令服务时使用。 */
+    _commandAgent?: unknown;
 }
+export type DshCommandExecutor = (agent: unknown, line: string) => Promise<string | undefined>;
 /**
  * DSH 服务句柄 —— 由插件注入,mock 可注入。
  * getOrCreate 必须返回带 dispose 的 live agent,便于 executor 统一释放。
@@ -41,6 +45,7 @@ export interface DshServiceHandles {
         sessionKey: string;
         sessionId: string;
         cwd?: string;
+        modelSelection: BridgeModelSelectionRef;
     }): Promise<DshRenderedAgent>;
     /**
      * 投递用户消息并等待本轮完成。
@@ -58,13 +63,15 @@ export interface DshServiceHandles {
  * - disposeAll() 在插件 teardown 时释放全部 live agent。
  * - disposeSession() 可主动丢弃某个会话(如错误恢复、会话上限)。
  */
-export declare class DshAgentExecutor implements AgentExecutor {
+export declare class DshAgentExecutor implements AgentExecutor, PermissionController {
     private readonly dsh;
     private readonly opts;
     private agents;
     private sessions;
     private sessionCwds;
     private sessionVersions;
+    private sessionSelections;
+    private selectionRefs;
     private queues;
     /**
      * 本 executor 实例(即一次插件挂载/一次 host boot)唯一的后缀。
@@ -74,13 +81,24 @@ export declare class DshAgentExecutor implements AgentExecutor {
     private readonly bootSuffix;
     constructor(dsh: DshServiceHandles, opts?: {
         defaultCwd?: string;
+        defaultProvider?: string;
+        defaultModel?: string;
+        models?: readonly string[];
+        resolveModelSelection?: (selection: BridgeModelSelection) => Promise<BridgeModelSelection>;
+        listModels?: (provider: string) => Promise<BridgeModelInfo[]>;
+        executeCommand?: DshCommandExecutor;
     });
     run(sessionKey: string, payload: string, onChunk?: (text: string, kind: 'text' | 'reasoning') => void): Promise<string>;
     private runNow;
+    runPermissionCommand(sessionKey: string, preset?: string): Promise<string>;
     /** 优先读 live agent 的实时会话日志,缺省则退回持久化 surface。 */
     private readEvents;
     /** 主动丢弃某个会话的 live agent。 */
     disposeSession(sessionKey: string): Promise<void>;
+    getModelSelection(sessionKey: string): BridgeModelSelection;
+    selectModel(sessionKey: string, model: string): Promise<BridgeModelSelection>;
+    selectReasoningEffort(sessionKey: string, effort: string): Promise<BridgeModelSelection>;
+    listModels(sessionKey: string): Promise<BridgeModelInfo[]>;
     /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
     setCwd(sessionKey: string, cwd: string): Promise<void>;
     /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */
@@ -88,7 +106,13 @@ export declare class DshAgentExecutor implements AgentExecutor {
     /** 释放全部 live agent(插件 teardown 时调用)。 */
     disposeAll(): Promise<void>;
     get liveSessionCount(): number;
+    private enqueue;
+    private getOrCreateSessionAgent;
     private createSessionId;
+    private selectionRef;
+    private setSelection;
+    private resolveSelection;
+    private defaultSelection;
 }
 /** 确定性哈希,把任意 sessionKey 映射到固定长度可用的 session id。 */
 export declare function hashKey(input: string): string;

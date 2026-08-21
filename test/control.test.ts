@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createSetCwdControlHandler,
+  createSetModelControlHandler,
+  createSetPermissionControlHandler,
+  createSetReasoningEffortControlHandler,
   parseQqControlBlocks,
   QqControlDispatcher,
 } from '../src/handlers/control.js'
@@ -54,6 +57,79 @@ describe('QQ control blocks', () => {
 
     expect(setCwd).toHaveBeenCalledWith('private:10001', join(root, 'next'))
     expect(message).toContain(`已切换当前 QQ 会话工作区: ${join(root, 'next')}`)
+  })
+
+  it('dispatches model controls through the shared selection controller', async () => {
+    const controller = {
+      getModelSelection: vi.fn(() => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })),
+      listModels: vi.fn(async () => [
+        {
+          provider: 'deepseek-official',
+          id: 'deepseek-v4-pro',
+          reasoningEfforts: ['off', 'low', 'high', 'max'],
+        },
+      ]),
+      selectModel: vi.fn(async (_sessionKey: string, model: string) => ({
+        provider: 'deepseek-official',
+        model,
+        reasoningEffort: 'high',
+      })),
+      selectReasoningEffort: vi.fn(async (_sessionKey: string, reasoningEffort: string) => ({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-pro',
+        reasoningEffort,
+      })),
+    }
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSetModelControlHandler(controller))
+    dispatcher.register(createSetReasoningEffortControlHandler(controller))
+    const ctx = {
+      sessionKey: 'private:10001',
+      source: {
+        userId: 10001,
+        scope: 'private' as const,
+        payload: '',
+        async respond() {},
+      },
+    }
+
+    const modelMessage = await dispatcher.dispatch({ action: 'set_model', model: 'deepseek-v4-pro' }, ctx)
+    const effortMessage = await dispatcher.dispatch({
+      action: 'set_reasoning_effort',
+      reasoningEffort: 'low',
+    }, ctx)
+
+    expect(controller.selectModel).toHaveBeenCalledWith('private:10001', 'deepseek-v4-pro')
+    expect(controller.selectReasoningEffort).toHaveBeenCalledWith('private:10001', 'low')
+    expect(modelMessage).toContain('已切换模型: deepseek-v4-pro')
+    expect(effortMessage).toContain('已切换推理等级: deepseek-v4-pro')
+    expect(effortMessage).toContain('reasoningEffort: low')
+  })
+
+  it('dispatches permission controls through the shared permission controller', async () => {
+    const permission = {
+      runPermissionCommand: vi.fn(async (_sessionKey: string, preset?: string) => (
+        `权限命令执行成功: preset ${preset}`
+      )),
+    }
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSetPermissionControlHandler(permission))
+
+    const message = await dispatcher.dispatch(
+      { action: 'set_permission', preset: 'workspace-write' },
+      {
+        sessionKey: 'private:10001',
+        source: {
+          userId: 10001,
+          scope: 'private',
+          payload: '',
+          async respond() {},
+        },
+      },
+    )
+
+    expect(permission.runPermissionCommand).toHaveBeenCalledWith('private:10001', 'workspace-write')
+    expect(message).toContain('preset workspace-write')
   })
 
   it('returns diagnostics for unknown actions', async () => {

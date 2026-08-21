@@ -8,9 +8,10 @@ import { buildBridgeInsertItem, buildOfficialBridgeInsertItem, updateSetupProfil
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from './dsh-settings.js';
 import { createOfficialPairCode, pairOfficialAdmin } from './official-pairing.js';
 import { installQqBridgePreset } from './qq-preset.js';
-import { canAcceptUserConfirmedLogin, classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, tryReadOnebotToken, updateOnebotConfigFile, } from './napcat.js';
+import { canAcceptUserConfirmedLogin, classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, tryReadOnebotToken, updateOnebotConfigFile, waitForOnebotWsEndpoint, } from './napcat.js';
 import { isPromptCancelledError, parseQq, Prompter } from './prompt.js';
 import { startDshWebBackground } from './dsh-runner.js';
+const ONEBOT_WS_URL = 'ws://127.0.0.1:3001';
 export async function runSetup() {
     const prompt = new Prompter();
     try {
@@ -67,14 +68,20 @@ async function runNapcatSetup(prompt) {
         return;
     const answers = await collectAnswers(prompt);
     const logPath = defaultNapcatLogPath(answers.napcatQq, answers.napcatRoot);
-    const token = await configureNapcatEnvironment(prompt, answers.napcatQq, answers.napcatRoot);
-    if (!token) {
-        console.log('\n未能取得 OneBot token。请在 NapCat WebUI 配好正向 WebSocket 后重新运行 setup。');
+    const napcat = await configureNapcatEnvironment(prompt, answers.napcatQq, answers.napcatRoot);
+    if (!napcat) {
+        console.log('\n未能完成 NapCat / OneBot 配置。请在 NapCat WebUI 配好正向 WebSocket 后重新运行 setup。');
         process.exitCode = 1;
         return;
     }
-    await configureDshProfile(answers, logPath, token);
+    await configureDshProfile(answers, logPath, napcat.token);
     await configureDshSettings(answers.permissionDefault);
+    if (!napcat.onebotReady) {
+        console.log('\n已写入 DSH profile，但 OneBot WS 当前不可连接，因此跳过启动 DSH web。');
+        printNapcatRecoveryGuidance(answers.napcatQq);
+        process.exitCode = 1;
+        return;
+    }
     await maybeStartDshWeb(prompt, answers.dshCheckout, () => printVerifyGuidance(answers), () => printVerifyGuidance(answers, '启动后'), `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`, '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。');
 }
 export function napcatCliInstallGuide() {
@@ -195,7 +202,7 @@ async function configureDshProfile(answers, logPath, token) {
     const pluginName = fileURLToPath(new URL('../index.js', import.meta.url));
     const item = buildBridgeInsertItem({
         pluginName,
-        wsUrl: 'ws://127.0.0.1:3001',
+        wsUrl: ONEBOT_WS_URL,
         token,
         adminQq: answers.senderQq,
         commandPrefix: answers.commandPrefix,
@@ -310,7 +317,21 @@ async function configureNapcatEnvironment(prompt, qq, napcatRoot) {
         printNapcatStatus(status);
     }
     await waitForNapcatLogin(prompt, qq, napcatRoot, status);
-    return prepareOnebot(prompt, onebotPath);
+    const token = await prepareOnebot(prompt, onebotPath);
+    if (!token)
+        return null;
+    console.log(`\n检查 OneBot WS 是否可连接: ${ONEBOT_WS_URL}`);
+    const endpoint = await waitForOnebotWsEndpoint({
+        wsUrl: ONEBOT_WS_URL,
+        token,
+        timeoutMs: 15000,
+    });
+    if (endpoint.ok) {
+        console.log('OneBot WS 连接检查通过。');
+        return { token, onebotReady: true };
+    }
+    console.warn(`OneBot WS 连接检查失败: ${endpoint.reason ?? 'unknown error'}`);
+    return { token, onebotReady: false };
 }
 async function prepareOnebot(prompt, configPath) {
     console.log(`\n配置 OneBot 正向 WebSocket: ${configPath}`);
@@ -435,6 +456,14 @@ function printNapcatLogGuidance(qq, napcatRoot, state) {
     }
     console.log(`查看命令: napcat log ${qq}`);
     console.log(`持续查看: tail -f ${logPath}`);
+}
+function printNapcatRecoveryGuidance(qq) {
+    console.log('请先让 NapCat 稳定运行，再启动或重启 DSH web。常用命令:');
+    console.log(`  napcat status ${qq}`);
+    console.log(`  napcat start ${qq}`);
+    console.log(`  napcat log ${qq}`);
+    console.log(`确认日志中出现 OneBot WebSocket 服务已启动后，再运行: dsh-qq-bridge setup`);
+    console.log('如果日志中出现 Electron / X connection / FATAL，请先处理 NapCat 进程崩溃或图形环境问题。');
 }
 function restartNapcatForQr(qq) {
     console.log(`二维码过期，将执行: napcat restart ${qq}`);

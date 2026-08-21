@@ -4,8 +4,10 @@ import { MessageRouter } from './router.js';
 import { AccessGate } from './security.js';
 import { AgentRpcHandler } from './handlers/agent.js';
 import { DshAgentExecutor } from './handlers/dsh-executor.js';
-import { DIR_COMMAND, DirectoryHandler } from './handlers/directory.js';
-import { createSetCwdControlHandler, QqControlDispatcher } from './handlers/control.js';
+import { DIR_COMMAND } from './handlers/directory.js';
+import { createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, QqControlDispatcher, } from './handlers/control.js';
+import { createScheduleTaskControlHandler, InMemoryTaskScheduler } from './handlers/scheduler.js';
+import { BridgeControlHandler, installBridgeModelSelection, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, } from './handlers/model-control.js';
 import { ShellHandler } from './handlers/shell.js';
 import { DshQqBridgeConfig } from './config.js';
 import { NapcatSelfLogInput } from './inputs/napcat-log.js';
@@ -49,10 +51,23 @@ export async function apply(ctx, options) {
     const unregisterInteractions = interactions.register(ctx);
     const router = new MessageRouter(gate, outbound, interactions);
     const workspaceAttachment = createWorkspaceAttachment(ctx);
-    const executor = makeDshExecutor(ctx, cfg.agent, interactions, workspaceAttachment.attach);
+    const llmAccess = createDshLlmAccess(ctx);
+    const commandsAccess = createDshCommandsAccess(ctx);
+    const executor = makeDshExecutor(ctx, cfg.agent, interactions, workspaceAttachment.attach, llmAccess.current, commandsAccess.current);
+    const taskScheduler = new InMemoryTaskScheduler({
+        executor,
+        maxMessageLength: cfg.agent.maxMessageLength,
+        send: async (target, text) => {
+            await outbound(target.scope, target.targetId, text);
+        },
+    });
     const controlDispatcher = new QqControlDispatcher();
     controlDispatcher.register(createSetCwdControlHandler(executor));
-    const unregisterDirectory = router.register(new DirectoryHandler(executor));
+    controlDispatcher.register(createSetModelControlHandler(executor));
+    controlDispatcher.register(createSetReasoningEffortControlHandler(executor));
+    controlDispatcher.register(createSetPermissionControlHandler(executor));
+    controlDispatcher.register(createScheduleTaskControlHandler(taskScheduler));
+    const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor));
     let unregisterShell = () => { };
     if (cfg.shell.enabled) {
         unregisterShell = router.register(new ShellHandler(async (cmd) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })));
@@ -65,7 +80,15 @@ export async function apply(ctx, options) {
         timeoutMs: cfg.agent.timeoutMs,
         timeoutMessage: cfg.agent.timeoutMessage,
         qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
-        reservedCommands: [DIR_COMMAND],
+        reservedCommands: [
+            DIR_COMMAND,
+            HELP_COMMAND,
+            MODELS_COMMAND,
+            MODEL_COMMAND,
+            REASONING_EFFORT_COMMAND,
+            PERMISSION_COMMAND,
+            PERMISSIONS_COMMAND,
+        ],
         controlDispatcher,
     }));
     // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
@@ -92,10 +115,13 @@ export async function apply(ctx, options) {
     }
     return async () => {
         unregisterAgent();
-        unregisterDirectory();
+        unregisterBridgeControl();
         unregisterShell();
         unregisterInteractions();
+        llmAccess.dispose();
+        commandsAccess.dispose();
         workspaceAttachment.dispose();
+        taskScheduler.dispose();
         unsubMessages();
         replyNotifier();
         selfLogInput?.stop();
@@ -108,10 +134,19 @@ export default { name, inject, apply };
 export function agentReplyNotificationsEnabled(cfg) {
     return cfg.notifications.agentReply.enabled ?? cfg.platform !== 'official';
 }
-function makeDshExecutor(ctx, agentCfg, interactions, attachWorkspace) {
+function makeDshExecutor(ctx, agentCfg, interactions, attachWorkspace, llm, commands) {
     const handles = wireDsh(ctx, agentCfg, interactions, attachWorkspace);
+    const modelOptions = {
+        defaultCwd: agentCfg?.cwd,
+        defaultProvider: agentCfg?.provider,
+        defaultModel: agentCfg?.model,
+        models: agentCfg?.models,
+        resolveModelSelection: createModelSelectionResolver(llm),
+        listModels: createModelLister(llm),
+        executeCommand: createDshCommandExecutor(commands),
+    };
     if (handles)
-        return new DshAgentExecutor(handles, { defaultCwd: agentCfg?.cwd });
+        return new DshAgentExecutor(handles, modelOptions);
     // 无 DSH 服务时占位,便于纯 CLI / 测试
     const fallback = {
         async getOrCreate() {
@@ -122,7 +157,7 @@ function makeDshExecutor(ctx, agentCfg, interactions, attachWorkspace) {
             return [];
         },
     };
-    return new DshAgentExecutor(fallback, { defaultCwd: agentCfg?.cwd });
+    return new DshAgentExecutor(fallback, modelOptions);
 }
 /** 把真实 DSH 服务包装成 executor 所需的句柄。 */
 function wireDsh(ctx, agentCfg, interactions, attachWorkspace) {
@@ -144,13 +179,21 @@ function wireDsh(ctx, agentCfg, interactions, attachWorkspace) {
                 sessionId: options.sessionId,
                 // agent 的 model 路由必须显式给出,否则 prompt 组装时 `{{model}}` 无值。
                 agentOptions: {
-                    ...(agentCfg?.provider ? { provider: agentCfg.provider } : {}),
-                    ...(agentCfg?.model ? { model: agentCfg.model } : {}),
+                    provider: options.modelSelection.current.provider,
+                    model: options.modelSelection.current.model,
+                    ...(options.modelSelection.current.reasoningEffort === undefined
+                        ? {}
+                        : { reasoningEffort: options.modelSelection.current.reasoningEffort }),
                 },
                 meta: { cwd, ...(agentCfg?.preset ? { agentPreset: agentCfg.preset } : {}) },
                 ...(ctx.agentPresets && agentCfg?.preset
-                    ? { setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, agentCfg.preset) }
-                    : {}),
+                    ? {
+                        setup: async (agentCtx) => {
+                            installBridgeModelSelection(agentCtx, options.modelSelection);
+                            await ctx.agentPresets.mount(agentCtx, agentCfg.preset);
+                        },
+                    }
+                    : { setup: (agentCtx) => void installBridgeModelSelection(agentCtx, options.modelSelection) }),
             });
             await attachWorkspace?.(options.sessionId, cwd);
             interactions?.bindAgent(options.sessionKey, handle.agent);
@@ -173,6 +216,7 @@ function wireDsh(ctx, agentCfg, interactions, attachWorkspace) {
                     await handle.dispose();
                 },
                 _session: session,
+                _commandAgent: handle.agent,
             };
         },
         async deliver(agent, prompt, onChunk) {
@@ -266,6 +310,129 @@ function wireDsh(ctx, agentCfg, interactions, attachWorkspace) {
                 return [];
             const snap = await query.readSurface(sessionId);
             return snap.events;
+        },
+    };
+}
+function createModelSelectionResolver(llm) {
+    return async (selection) => {
+        const runtime = llm?.();
+        if (!runtime?.resolveCallConfig)
+            return selection;
+        const resolved = await runtime.resolveCallConfig(selection);
+        return {
+            provider: resolved.provider,
+            model: resolved.model,
+            ...(resolved.reasoningEffort === undefined ? {} : { reasoningEffort: resolved.reasoningEffort }),
+        };
+    };
+}
+function createModelLister(llm) {
+    return async (provider) => {
+        const runtime = llm?.();
+        if (!runtime?.listModels)
+            return [];
+        const models = await runtime.listModels(provider).catch(() => []);
+        return await Promise.all(models.map(async (model) => {
+            const base = {
+                provider: model.provider ?? provider,
+                id: model.id,
+                name: model.name,
+            };
+            if (!runtime.resolveModelInfo)
+                return base;
+            try {
+                const resolved = await runtime.resolveModelInfo(provider, model.id);
+                const reasoning = resolved.reasoning;
+                if (!reasoning)
+                    return base;
+                return {
+                    ...base,
+                    reasoningEfforts: reasoning.efforts.map(effort => effort.id),
+                    ...(reasoning.defaultEffort === undefined ? {} : { defaultReasoningEffort: reasoning.defaultEffort }),
+                };
+            }
+            catch {
+                return base;
+            }
+        }));
+    };
+}
+function createDshCommandExecutor(commands) {
+    return async (agent, line) => {
+        const runtime = commands?.();
+        if (!runtime?.execute)
+            return undefined;
+        const execution = await runtime.execute(agent, line, [], new AbortController().signal);
+        const result = execution?.result;
+        if (!result)
+            return undefined;
+        const text = result.text?.trim();
+        if (result.kind === 'error')
+            return `权限命令执行失败: ${text || 'unknown error'}`;
+        if (text)
+            return `权限命令执行成功: ${text}`;
+        return '权限命令执行成功。';
+    };
+}
+function createDshLlmAccess(ctx) {
+    let llm;
+    const disposers = [];
+    if (ctx.inject) {
+        const fiber = ctx.inject(['llm'], (childCtx) => {
+            const scoped = childCtx;
+            const current = scoped.llm;
+            llm = current;
+            scoped.effect?.(() => () => {
+                if (llm === current)
+                    llm = undefined;
+            }, 'dsh-qq-bridge.llm');
+        }, 'dsh-qq-bridge.llm');
+        if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+            disposers.push(() => fiber.dispose());
+        }
+    }
+    else {
+        llm = ctx.llm;
+    }
+    return {
+        current() {
+            return llm;
+        },
+        dispose() {
+            llm = undefined;
+            for (const dispose of disposers.splice(0))
+                dispose();
+        },
+    };
+}
+function createDshCommandsAccess(ctx) {
+    let commands;
+    const disposers = [];
+    if (ctx.inject) {
+        const fiber = ctx.inject(['commands'], (childCtx) => {
+            const scoped = childCtx;
+            const current = scoped.commands;
+            commands = current;
+            scoped.effect?.(() => () => {
+                if (commands === current)
+                    commands = undefined;
+            }, 'dsh-qq-bridge.commands');
+        }, 'dsh-qq-bridge.commands');
+        if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+            disposers.push(() => fiber.dispose());
+        }
+    }
+    else {
+        commands = ctx.commands;
+    }
+    return {
+        current() {
+            return commands;
+        },
+        dispose() {
+            commands = undefined;
+            for (const dispose of disposers.splice(0))
+                dispose();
         },
     };
 }

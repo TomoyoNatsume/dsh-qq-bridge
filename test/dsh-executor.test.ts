@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { DshAgentExecutor, extractLastAssistantText, hashKey, DshRenderedAgent, isUnexecutedDsmlToolCall } from '../src/handlers/dsh-executor.js'
+import { BridgeModelSelectionRef, installBridgeModelSelection } from '../src/handlers/model-control.js'
 
 function surfaceEvent(type: string, content: unknown[]) {
   return { type, content }
@@ -9,26 +10,30 @@ interface MockState {
   createCalls: string[]
   createCwds: Array<string | undefined>
   createSessionIds: string[]
+  createSelections: BridgeModelSelectionRef[]
   drops: string[]
 }
 
 /** 内存 mock:按 sessionId 记录创建/释放,readSurface 返回固定 surface 序列。 */
 function makeMock(repliesBySession: Record<string, unknown[]>) {
   const live = new Map<string, DshRenderedAgent>()
-  const state: MockState = { createCalls: [], createCwds: [], createSessionIds: [], drops: [] }
+  const state: MockState = { createCalls: [], createCwds: [], createSessionIds: [], createSelections: [], drops: [] }
   const dsh = {
     async getOrCreate({
       sessionKey,
       sessionId,
       cwd,
+      modelSelection,
     }: {
       sessionKey: string
       sessionId: string
       cwd?: string
+      modelSelection: BridgeModelSelectionRef
     }): Promise<DshRenderedAgent> {
       state.createCalls.push(sessionKey)
       state.createCwds.push(cwd)
       state.createSessionIds.push(sessionId)
+      state.createSelections.push(modelSelection)
       const agent: DshRenderedAgent = {
         followup: vi.fn(),
         async whenIdle() {},
@@ -36,6 +41,7 @@ function makeMock(repliesBySession: Record<string, unknown[]>) {
           live.delete(sessionId)
           state.drops.push(sessionId)
         },
+        _commandAgent: { sessionKey, sessionId },
       }
       live.set(sessionId, agent)
       return agent
@@ -127,6 +133,98 @@ describe('dsh-qq-bridge — DshAgentExecutor(多轮上下文)', () => {
     expect(exec.getCwd('private:10001')).toBe('/default')
     await exec.setCwd('private:10001', '/tmp')
     expect(exec.getCwd('private:10001')).toBe('/tmp')
+  })
+
+  it('selectModel 更新当前 live agent 的 selection ref,不销毁 session', async () => {
+    const { dsh, state } = makeMock({})
+    const dispose = vi.fn()
+    const exec = new DshAgentExecutor(dsh as never, {
+      defaultProvider: 'deepseek-official',
+      defaultModel: 'deepseek-v4-flash',
+      resolveModelSelection: async (selection) => ({
+        ...selection,
+        reasoningEffort: selection.model === 'deepseek-v4-pro' ? 'high' : selection.reasoningEffort,
+      }),
+    })
+
+    await exec.run('private:10001', 'before')
+    state.createSelections[0].current.model = 'deepseek-v4-flash'
+    ;(exec as unknown as { agents: Map<string, { dispose(): Promise<void> }> }).agents.get('private:10001')!.dispose = async () => {
+      dispose()
+    }
+
+    const selected = await exec.selectModel('private:10001', 'deepseek-v4-pro')
+
+    expect(selected).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'high' })
+    expect(state.createSelections[0].current).toEqual(selected)
+    expect(dispose).not.toHaveBeenCalled()
+    expect(exec.liveSessionCount).toBe(1)
+  })
+
+  it('runPermissionCommand 通过当前 live agent 执行 DSH 原生命令且不投递用户消息', async () => {
+    const { dsh, state } = makeMock({})
+    const deliver = vi.spyOn(dsh, 'deliver')
+    const executeCommand = vi.fn(async (_agent: unknown, line: string) => `权限命令执行成功: ${line}`)
+    const exec = new DshAgentExecutor(dsh as never, { executeCommand })
+
+    const out = await exec.runPermissionCommand('private:10001', 'workspace-write')
+
+    expect(out).toBe('权限命令执行成功: /permission workspace-write')
+    expect(state.createCalls).toEqual(['private:10001'])
+    expect(executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: 'private:10001' }),
+      '/permission workspace-write',
+    )
+    expect(deliver).not.toHaveBeenCalled()
+    expect(exec.liveSessionCount).toBe(1)
+  })
+
+  it('installBridgeModelSelection 在下一次 request 边界应用快照', async () => {
+    const listeners = new Map<string, (...args: never[]) => unknown>()
+    const agentCtx = {
+      on: vi.fn((event: string, cb: (...args: never[]) => unknown) => {
+        listeners.set(event, cb)
+        return () => listeners.delete(event)
+      }),
+    }
+    const selection: BridgeModelSelectionRef = {
+      current: { provider: 'alpha', model: 'a1', reasoningEffort: 'high' },
+    }
+
+    const dispose = installBridgeModelSelection(agentCtx, selection)
+    const assemble = listeners.get('system-prompt/assemble')!
+    const request = listeners.get('agent/request')!
+
+    const assembled = await assemble({}, {}, async () => ({ variables: { cwd: '/work' } })) as { variables: Record<string, unknown> }
+    expect(assembled.variables).toEqual({ cwd: '/work', provider: 'alpha', model: 'a1' })
+
+    selection.current = { provider: 'beta', model: 'b1' }
+    await expect(request({}, async () => ({
+      provider: 'seed',
+      model: 'seed',
+      reasoningEffort: 'old',
+      temperature: 0.2,
+    }))).resolves.toEqual({
+      provider: 'alpha',
+      model: 'a1',
+      reasoningEffort: 'high',
+      temperature: 0.2,
+    })
+
+    await assemble({}, {}, async () => ({ variables: {} }))
+    await expect(request({}, async () => ({
+      provider: 'seed',
+      model: 'seed',
+      reasoningEffort: 'old',
+      temperature: 0.2,
+    }))).resolves.toEqual({
+      provider: 'beta',
+      model: 'b1',
+      temperature: 0.2,
+    })
+
+    dispose()
+    expect(listeners.size).toBe(0)
   })
 
   it('并发消息按 sessionKey 串行,不并驱同一会话', async () => {

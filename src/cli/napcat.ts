@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { WebSocket } from 'ws'
 
 export interface OneBotServerSummary {
   enable: boolean
@@ -17,6 +18,18 @@ export interface OneBotConfigUpdate {
   token: string
   server: OneBotServerSummary
   content: string
+}
+
+export interface OnebotWsEndpointCheckOptions {
+  wsUrl: string
+  token?: string
+  timeoutMs?: number
+  retryIntervalMs?: number
+}
+
+export interface OnebotWsEndpointCheckResult {
+  ok: boolean
+  reason?: string
 }
 
 export type NapcatRuntimeState = 'running' | 'not-running' | 'unknown'
@@ -71,6 +84,25 @@ export async function updateOnebotConfigFile(path: string): Promise<OneBotConfig
   const update = updateOnebotConfig(raw)
   if (update.changed) await writeFile(path, update.content, 'utf8')
   return update
+}
+
+export async function waitForOnebotWsEndpoint(
+  options: OnebotWsEndpointCheckOptions,
+): Promise<OnebotWsEndpointCheckResult> {
+  const timeoutMs = options.timeoutMs ?? 15000
+  const retryIntervalMs = options.retryIntervalMs ?? 800
+  const deadline = Date.now() + timeoutMs
+  let lastReason = 'timeout'
+
+  while (Date.now() <= deadline) {
+    const result = await probeOnebotWsEndpoint(options.wsUrl, options.token, Math.min(2500, Math.max(500, deadline - Date.now())))
+    if (result.ok) return result
+    lastReason = result.reason ?? lastReason
+    if (Date.now() >= deadline) break
+    await sleep(Math.min(retryIntervalMs, Math.max(0, deadline - Date.now())))
+  }
+
+  return { ok: false, reason: lastReason }
 }
 
 export function updateOnebotConfig(raw: string): OneBotConfigUpdate {
@@ -189,6 +221,36 @@ function firstWebSocketServer(json: unknown): Record<string, unknown> | null {
   return servers[0]
 }
 
+function probeOnebotWsEndpoint(wsUrl: string, token: string | undefined, timeoutMs: number): Promise<OnebotWsEndpointCheckResult> {
+  return new Promise((resolve) => {
+    let settled = false
+    let ws: WebSocket | undefined
+    const finish = (result: OnebotWsEndpointCheckResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { ws?.close() } catch { /* noop */ }
+      resolve(result)
+    }
+    const timer = setTimeout(() => finish({ ok: false, reason: `connect timeout after ${timeoutMs}ms` }), timeoutMs)
+
+    try {
+      const authToken = token?.trim()
+      ws = new WebSocket(wsUrl, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      })
+    } catch (err) {
+      finish({ ok: false, reason: err instanceof Error ? err.message : String(err) })
+      return
+    }
+
+    ws.once('open', () => finish({ ok: true }))
+    ws.once('error', (err) => finish({ ok: false, reason: err instanceof Error ? err.message : String(err) }))
+    ws.once('unexpected-response', (_req, res) => finish({ ok: false, reason: `HTTP ${res.statusCode}` }))
+    ws.once('close', () => finish({ ok: false, reason: 'socket closed before open' }))
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -199,4 +261,8 @@ function randomToken(): string {
 
 function matchesAny(text: string, needles: readonly string[]): boolean {
   return needles.some((needle) => text.includes(needle))
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
