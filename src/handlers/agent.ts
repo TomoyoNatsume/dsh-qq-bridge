@@ -1,5 +1,6 @@
 import { Handler, HandlerContext } from '../router.js'
 import { parseQqControlBlocks, QqControlDispatcher } from './control.js'
+import { AgentRunGate } from '../web-activity.js'
 
 export const DEFAULT_QQ_REPLY_STYLE_SKILL_NAME = 'qq-session-reply-style'
 
@@ -94,6 +95,10 @@ export class AgentRpcHandler implements Handler {
       reservedCommands?: readonly string[]
       /** Assistant 输出控制块的执行器。存在时会先解析最终文本再回发。 */
       controlDispatcher?: QqControlDispatcher
+      /** Web session 正在运行时,延后 QQ agent run 的全局 gate。 */
+      webActivityGate?: AgentRunGate
+      /** Web session 忙时先回发给 QQ 的提示。 */
+      webBusyMessage?: string
     } = {},
   ) {}
 
@@ -117,6 +122,16 @@ export class AgentRpcHandler implements Handler {
     const sessionKey = sessionKeyOf(ctx)
     const styleSkill = this.nextQqStyleSkillInjection(sessionKey)
     const payload = formatQqReplyStyleSkillPrompt(ctx.payload, styleSkill)
+    const gate = this.opts.webActivityGate
+    if (gate?.isBusy()) {
+      await this.respondChunk(ctx, this.opts.webBusyMessage ?? '当前 Web 会话正在运行，请稍后...')
+      await gate.enqueueWhenIdle(() => this.runAgentTurn(ctx, sessionKey, payload))
+      return
+    }
+    await this.runAgentTurn(ctx, sessionKey, payload)
+  }
+
+  private async runAgentTurn(ctx: HandlerContext, sessionKey: string, payload: string): Promise<void> {
     const ackMessage = this.opts.ackMessage ?? '收到，正在处理...'
     const timeoutMs = this.opts.timeoutMs ?? 120_000
     const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。'

@@ -77,7 +77,9 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 插件会先发送确认消息，随后把 Agent 的最终回复发回 QQ。默认前缀为空，白名单用户的所有消息都会进入 Agent；可在 `access.commandPrefix` 中改回 `/dsh`、`/ai` 等前缀。`/dir <目录>` 是内置控制命令，用来切换当前 QQ 会话的工作区，目录存在时下一条消息会使用新的 Agent session，并通过 DSH workspaceRegistry 归类到 Web UI 对应工作区。`/models`、`/model <模型名>`、`/reasoningEff <等级>`、`/permission [preset]`、`/permissions` 和 `/help` 是 bridge 侧控制命令，不经过 Agent；模型和推理等级切换会按 Web UI 的 model selection 机制在下一次模型请求生效，正在运行的请求不受影响。权限切换会调用 DSH 原生 `/permission` command，作用于当前 QQ 会话的 live session。
 
-如果你用自然语言要求 Agent 切换工作目录、模型、推理等级、权限，或创建一次性定时任务，QQ 专用 preset 会让 Agent 输出私有控制块；插件会拦截并执行 `set_cwd`、`set_model`、`set_reasoning_effort`、`set_permission` 或 `schedule_task`，不会把控制块内容发回 QQ。定时任务使用插件内存 timer，到点后会在同一个 QQ 会话触发 Agent 并主动发回 QQ；重启 DSH/插件后未触发的定时任务会丢失。
+如果 QQ 消息到达时 Web UI 里有非 QQ 主会话正在运行，插件会先回复 `当前 Web 会话正在运行，请稍后...`，并把这条 QQ Agent 消息放入全局 FIFO 队列；等 Web 会话结束后再发送正常确认消息并执行。QQ 自己的 `qq-...` 会话和 subagent 不会触发这个阻塞，bridge 侧控制命令也会继续立即处理。
+
+如果你用自然语言要求 Agent 切换工作目录、模型、推理等级、权限，创建一次性定时任务，或记录 memo，QQ 专用 preset 会让 Agent 输出私有控制块；插件会拦截并执行 `set_cwd`、`set_model`、`set_reasoning_effort`、`set_permission`、`schedule_task` 或 `save_memo`，不会把控制块内容发回 QQ。定时任务和 memo 会通过 DSH `storageDomain` 持久化；默认 Web JSON 后端会落到 `~/.dsh/storages/dsh_qq_bridge.json`。插件启动和每 2 小时扫描一次 pending timer，2 小时内到期的任务才会挂短计时器，到点后在同一个 QQ 会话触发 Agent 并主动发回 QQ。
 
 内置控制命令统一由 bridge control handler 管理，并优先于 Agent 消息处理。后续新增 `/xxx` 指令时，应挂到同一个 bridge control handler；命中后会独占消费，不会把控制命令误发给 Agent。
 
@@ -263,7 +265,8 @@ QQ 专用 Agent preset 还支持自然语言控制。Agent 会输出私有 `<dsh
 | `把模型改成 deepseek-v4-pro` | `set_model` | 与 `/model <模型名>` 一致，动态切换当前 QQ 会话模型。 |
 | `推理等级改成 high` | `set_reasoning_effort` | 与 `/reasoningEff <等级>` 一致，动态切换当前 QQ 会话推理等级。 |
 | `权限改成 workspace-write` | `set_permission` | 与 `/permission <preset>` 一致，切换当前 QQ live session 权限。 |
-| `请在 2026 年 9 月 1 号中午 12 点提醒我提交报告` | `schedule_task` | 创建一次性插件内存 timer；到点后在同一个 QQ 会话触发 Agent 并主动发回 QQ。重启后未触发任务会丢失。 |
+| `请在 2026 年 9 月 1 号中午 12 点提醒我提交报告` | `schedule_task` | 创建一次性持久化 timer；插件启动和每 2 小时扫描 pending timer，2 小时内到期才挂短计时器。 |
+| `记一下：2026/07/08 日收入 350 元` | `save_memo` | 持久化记录一条 memo，默认存储在 `~/.dsh/storages/dsh_qq_bridge.json`。 |
 
 ## 配置
 

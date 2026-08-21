@@ -2,6 +2,7 @@ import { AgentExecutor } from './agent.js';
 import { QqControlActionHandler } from './control.js';
 import { HandlerContext } from '../router.js';
 import type { MessageTargetId } from '../onebot/types.js';
+import { CustomMemoryStore } from './custom-memory.js';
 export interface ScheduledTaskTarget {
     scope: 'private' | 'group';
     targetId: MessageTargetId;
@@ -28,13 +29,17 @@ export interface ScheduledTaskController {
 }
 export interface InMemoryTaskSchedulerOptions {
     executor: AgentExecutor;
+    store?: CustomMemoryStore;
     send(target: ScheduledTaskTarget, text: string): Promise<void>;
     now?: () => number;
     maxMessageLength?: number;
+    scanWindowMs?: number;
+    scanIntervalMs?: number;
 }
 export declare class InMemoryTaskScheduler implements ScheduledTaskController {
     private readonly opts;
     private readonly tasks;
+    private scanTimer?;
     constructor(opts: InMemoryTaskSchedulerOptions);
     scheduleTask(input: {
         sessionKey: string;
@@ -42,12 +47,18 @@ export declare class InMemoryTaskScheduler implements ScheduledTaskController {
         runAt: string;
         message: string;
     }): Promise<ScheduledTaskReceipt>;
+    startScanning(): void;
+    scanDueTasks(): Promise<void>;
     dispose(): void;
     get size(): number;
+    private armIfWithinWindow;
     private arm;
     private fire;
     private sendAgentResult;
     private sendChunks;
     private now;
+    private scanWindowMs;
+    private store;
+    private markTask;
 }
 export declare function createScheduleTaskControlHandler(controller: ScheduledTaskController): QqControlActionHandler;

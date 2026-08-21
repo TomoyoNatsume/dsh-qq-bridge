@@ -22,5 +22,6 @@ Do not store these QQ-session constraints as memory, user facts, long-term prefe
 
 - **Reply style**: Read [references/reply-style.md](references/reply-style.md) whenever preparing a reply for the QQ session.
 - **Session control**: Read [references/session-control.md](references/session-control.md) when the QQ user explicitly asks to change this QQ session's working directory or requests another bridge-side session action.
+- **Custom memory**: Read [references/custom_memory.md](references/custom_memory.md) when the QQ user explicitly asks to save a memo or create a scheduled reminder/task.
 
 When adding new QQ-session behavior, place the detailed instructions in a dedicated file under `references/` and add a short routing entry here.

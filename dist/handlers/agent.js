@@ -59,6 +59,15 @@ export class AgentRpcHandler {
         const sessionKey = sessionKeyOf(ctx);
         const styleSkill = this.nextQqStyleSkillInjection(sessionKey);
         const payload = formatQqReplyStyleSkillPrompt(ctx.payload, styleSkill);
+        const gate = this.opts.webActivityGate;
+        if (gate?.isBusy()) {
+            await this.respondChunk(ctx, this.opts.webBusyMessage ?? '当前 Web 会话正在运行，请稍后...');
+            await gate.enqueueWhenIdle(() => this.runAgentTurn(ctx, sessionKey, payload));
+            return;
+        }
+        await this.runAgentTurn(ctx, sessionKey, payload);
+    }
+    async runAgentTurn(ctx, sessionKey, payload) {
         const ackMessage = this.opts.ackMessage ?? '收到，正在处理...';
         const timeoutMs = this.opts.timeoutMs ?? 120_000;
         const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。';

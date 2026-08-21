@@ -6,6 +6,7 @@ import { AgentRpcHandler } from './handlers/agent.js';
 import { DshAgentExecutor } from './handlers/dsh-executor.js';
 import { DIR_COMMAND } from './handlers/directory.js';
 import { createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, QqControlDispatcher, } from './handlers/control.js';
+import { createSaveMemoControlHandler, LazyCustomMemoryStore } from './handlers/custom-memory.js';
 import { createScheduleTaskControlHandler, InMemoryTaskScheduler } from './handlers/scheduler.js';
 import { BridgeControlHandler, installBridgeModelSelection, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, } from './handlers/model-control.js';
 import { ShellHandler } from './handlers/shell.js';
@@ -14,6 +15,7 @@ import { NapcatSelfLogInput } from './inputs/napcat-log.js';
 import { homedir } from 'node:os';
 import { TencentOfficialBotClient } from './official/client.js';
 import { QqInteractionBridge } from './interactions.js';
+import { DshWebActivityGate } from './web-activity.js';
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
@@ -49,23 +51,29 @@ export async function apply(ctx, options) {
     };
     const interactions = new QqInteractionBridge(outbound, cfg.access.commandPrefix);
     const unregisterInteractions = interactions.register(ctx);
+    const webActivity = DshWebActivityGate.register(ctx);
     const router = new MessageRouter(gate, outbound, interactions);
     const workspaceAttachment = createWorkspaceAttachment(ctx);
     const llmAccess = createDshLlmAccess(ctx);
     const commandsAccess = createDshCommandsAccess(ctx);
+    const storageDomainAccess = createDshStorageDomainAccess(ctx);
+    const customMemoryStore = new LazyCustomMemoryStore(storageDomainAccess.current);
     const executor = makeDshExecutor(ctx, cfg.agent, interactions, workspaceAttachment.attach, llmAccess.current, commandsAccess.current);
     const taskScheduler = new InMemoryTaskScheduler({
         executor,
+        store: customMemoryStore,
         maxMessageLength: cfg.agent.maxMessageLength,
         send: async (target, text) => {
             await outbound(target.scope, target.targetId, text);
         },
     });
+    taskScheduler.startScanning();
     const controlDispatcher = new QqControlDispatcher();
     controlDispatcher.register(createSetCwdControlHandler(executor));
     controlDispatcher.register(createSetModelControlHandler(executor));
     controlDispatcher.register(createSetReasoningEffortControlHandler(executor));
     controlDispatcher.register(createSetPermissionControlHandler(executor));
+    controlDispatcher.register(createSaveMemoControlHandler(customMemoryStore));
     controlDispatcher.register(createScheduleTaskControlHandler(taskScheduler));
     const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor));
     let unregisterShell = () => { };
@@ -80,6 +88,7 @@ export async function apply(ctx, options) {
         timeoutMs: cfg.agent.timeoutMs,
         timeoutMessage: cfg.agent.timeoutMessage,
         qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
+        webActivityGate: webActivity.gate,
         reservedCommands: [
             DIR_COMMAND,
             HELP_COMMAND,
@@ -118,10 +127,13 @@ export async function apply(ctx, options) {
         unregisterBridgeControl();
         unregisterShell();
         unregisterInteractions();
+        webActivity.dispose();
         llmAccess.dispose();
         commandsAccess.dispose();
+        storageDomainAccess.dispose();
         workspaceAttachment.dispose();
         taskScheduler.dispose();
+        await customMemoryStore.close();
         unsubMessages();
         replyNotifier();
         selfLogInput?.stop();
@@ -431,6 +443,37 @@ function createDshCommandsAccess(ctx) {
         },
         dispose() {
             commands = undefined;
+            for (const dispose of disposers.splice(0))
+                dispose();
+        },
+    };
+}
+function createDshStorageDomainAccess(ctx) {
+    let storageDomain;
+    const disposers = [];
+    if (ctx.inject) {
+        const fiber = ctx.inject(['storageDomain'], (childCtx) => {
+            const scoped = childCtx;
+            const current = scoped.storageDomain;
+            storageDomain = current;
+            scoped.effect?.(() => () => {
+                if (storageDomain === current)
+                    storageDomain = undefined;
+            }, 'dsh-qq-bridge.storageDomain');
+        }, 'dsh-qq-bridge.storageDomain');
+        if (fiber && typeof fiber === 'object' && typeof fiber.dispose === 'function') {
+            disposers.push(() => fiber.dispose());
+        }
+    }
+    else {
+        storageDomain = ctx.storageDomain;
+    }
+    return {
+        current() {
+            return storageDomain;
+        },
+        dispose() {
+            storageDomain = undefined;
             for (const dispose of disposers.splice(0))
                 dispose();
         },

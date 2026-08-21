@@ -1,3 +1,4 @@
+import type { DshStorageDomainRuntime } from './handlers/custom-memory.js';
 import { BridgeModelSelection } from './handlers/model-control.js';
 import { DshQqBridgeConfig } from './config.js';
 import { OnebotMessageEvent, PlatformReplyTarget } from './onebot/types.js';
@@ -40,6 +41,7 @@ interface DshCtx extends InteractionCtxLike {
     workspaceRegistry?: DshWorkspaceRegistry;
     llm?: DshLlmRuntime;
     commands?: DshCommandRuntime;
+    storageDomain?: DshStorageDomainRuntime;
     on?(event: 'session/event', cb: (subject: DshSessionSubject, event: unknown) => void, options?: {
         prepend?: boolean;
     }): () => void;

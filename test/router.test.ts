@@ -13,6 +13,7 @@ import { createScheduleTaskControlHandler } from '../src/handlers/scheduler.js'
 import { BridgeControlHandler } from '../src/handlers/model-control.js'
 import { ShellHandler } from '../src/handlers/shell.js'
 import { OnebotMessageEvent } from '../src/onebot/types.js'
+import { DshWebActivityGate } from '../src/web-activity.js'
 
 function makeEvent(partial: Partial<OnebotMessageEvent> & { user_id: number; raw_message: string }): OnebotMessageEvent {
   return {
@@ -144,6 +145,86 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(consumed).toBe(true)
     expect(run).toHaveBeenCalledWith('private:10001', '当前目录是什么')
     expect(sent).toEqual(['r:当前目录是什么'])
+  })
+
+  it('Web session 正在运行时,QQ agent 消息先提示忙并等待 Web idle 后执行', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const webActivityGate = new DshWebActivityGate()
+    webActivityGate.observe({ id: 'web-session-1' }, { type: 'turn/start', data: { turn: 1 } })
+    const executor = { run: vi.fn(async (_key: string, payload: string) => `echo:${payload}`) }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, { webActivityGate }))
+
+    const routing = router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello' }))
+    await Promise.resolve()
+
+    expect(executor.run).not.toHaveBeenCalled()
+    expect(sent).toEqual(['当前 Web 会话正在运行，请稍后...'])
+
+    webActivityGate.observe({ id: 'web-session-1' }, {
+      type: 'turn/end',
+      data: { turn: 1, reason: { kind: 'completed' } },
+    })
+    await routing
+
+    expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello')
+    expect(sent).toEqual(['当前 Web 会话正在运行，请稍后...', '收到，正在处理...', 'echo:hello'])
+  })
+
+  it('Web busy 期间多条 QQ agent 消息按 FIFO 顺序推进', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const webActivityGate = new DshWebActivityGate()
+    webActivityGate.observe({ id: 'web-session-1' }, { type: 'turn/start', data: { turn: 1 } })
+    const calls: string[] = []
+    const executor = {
+      run: vi.fn(async (_key: string, payload: string) => {
+        calls.push(payload)
+        return `r:${payload}`
+      }),
+    }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, { ackMessage: '', webActivityGate }))
+
+    const first = router.route(makeEvent({ user_id: 10001, raw_message: '/dsh first' }))
+    const second = router.route(makeEvent({ user_id: 10001, raw_message: '/dsh second' }))
+    await Promise.resolve()
+
+    expect(calls).toEqual([])
+    expect(sent).toEqual([
+      '当前 Web 会话正在运行，请稍后...',
+      '当前 Web 会话正在运行，请稍后...',
+    ])
+
+    webActivityGate.observe({ id: 'web-session-1' }, {
+      type: 'turn/end',
+      data: { turn: 1, reason: { kind: 'completed' } },
+    })
+    await Promise.all([first, second])
+
+    expect(calls).toEqual(['first', 'second'])
+    expect(sent).toEqual([
+      '当前 Web 会话正在运行，请稍后...',
+      '当前 Web 会话正在运行，请稍后...',
+      'r:first',
+      'r:second',
+    ])
+  })
+
+  it('QQ-backed session running does not block QQ agent messages as Web busy', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const webActivityGate = new DshWebActivityGate()
+    webActivityGate.observe({ id: 'qq-session-1' }, { type: 'turn/start', data: { turn: 1 } })
+    const executor = { run: vi.fn(async (_key: string, payload: string) => `echo:${payload}`) }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, { webActivityGate }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh hello' }))
+
+    expect(executor.run).toHaveBeenCalledWith('private:10001', 'hello')
+    expect(sent).toEqual(['收到，正在处理...', 'echo:hello'])
   })
 
   it('/dir 切换工作区后不会再进入 agent handler', async () => {

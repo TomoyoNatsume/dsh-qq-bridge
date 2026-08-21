@@ -1,10 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import { splitText } from './agent.js';
 import { parseQqControlBlocks } from './control.js';
+import { createTimerRecord, } from './custom-memory.js';
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const DEFAULT_SCAN_WINDOW_MS = 2 * 60 * 60 * 1000;
 export class InMemoryTaskScheduler {
     opts;
     tasks = new Map();
+    scanTimer;
     constructor(opts) {
         this.opts = opts;
     }
@@ -21,21 +23,37 @@ export class InMemoryTaskScheduler {
             throw new Error(`无法解析定时任务时间: ${runAtText}`);
         if (time <= this.now())
             throw new Error(`定时任务时间必须晚于当前时间: ${runAtText}`);
-        const target = targetFromSource(input.source);
-        const task = {
-            id: randomUUID(),
+        const record = createTimerRecord({
+            source: input.source,
             sessionKey: input.sessionKey,
-            target,
-            runAt,
-            runAtText,
-            message,
-        };
-        const entry = { task, disposed: false };
-        this.tasks.set(task.id, entry);
-        this.arm(entry);
-        return { id: task.id, runAtText };
+            time: runAtText,
+            content: message,
+            now: this.opts.now,
+        });
+        await this.store().saveTimer(record);
+        this.armIfWithinWindow(record);
+        return { id: record.uuid, runAtText };
+    }
+    startScanning() {
+        if (this.scanTimer)
+            return;
+        void this.scanDueTasks();
+        this.scanTimer = setInterval(() => {
+            void this.scanDueTasks();
+        }, this.opts.scanIntervalMs ?? DEFAULT_SCAN_WINDOW_MS);
+    }
+    async scanDueTasks() {
+        const timers = await this.store().listTimers();
+        for (const timer of timers) {
+            if (timer.status !== 'pending')
+                continue;
+            this.armIfWithinWindow(timer);
+        }
     }
     dispose() {
+        if (this.scanTimer)
+            clearInterval(this.scanTimer);
+        this.scanTimer = undefined;
         for (const entry of this.tasks.values()) {
             entry.disposed = true;
             if (entry.timer)
@@ -45,6 +63,20 @@ export class InMemoryTaskScheduler {
     }
     get size() {
         return this.tasks.size;
+    }
+    armIfWithinWindow(record) {
+        const runAt = new Date(record.time);
+        const time = runAt.getTime();
+        if (!Number.isFinite(time))
+            return;
+        if (time - this.now() > this.scanWindowMs())
+            return;
+        const task = taskFromRecord(record, runAt);
+        if (this.tasks.has(task.id))
+            return;
+        const entry = { task, disposed: false };
+        this.tasks.set(task.id, entry);
+        this.arm(entry);
     }
     arm(entry) {
         if (entry.disposed)
@@ -64,8 +96,10 @@ export class InMemoryTaskScheduler {
         try {
             const result = await this.opts.executor.run(entry.task.sessionKey, formatScheduledTaskPrompt(entry.task));
             await this.sendAgentResult(entry.task.target, result || '(no output)');
+            await this.markTask(entry.task.id, 'fired');
         }
         catch (err) {
+            await this.markTask(entry.task.id, 'failed', err instanceof Error ? err.message : String(err));
             await this.sendChunks(entry.task.target, `定时任务执行失败: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
@@ -86,6 +120,25 @@ export class InMemoryTaskScheduler {
     }
     now() {
         return this.opts.now?.() ?? Date.now();
+    }
+    scanWindowMs() {
+        return this.opts.scanWindowMs ?? DEFAULT_SCAN_WINDOW_MS;
+    }
+    store() {
+        return this.opts.store ?? fallbackStore;
+    }
+    async markTask(id, status, error) {
+        const store = this.store();
+        const current = (await store.listTimers()).find(timer => timer.uuid === id);
+        if (!current)
+            return;
+        await store.updateTimer({
+            ...current,
+            status,
+            updatedAt: new Date(this.now()).toISOString(),
+            ...(status === 'fired' ? { firedAt: new Date(this.now()).toISOString() } : {}),
+            ...(error ? { error } : {}),
+        });
     }
 }
 export function createScheduleTaskControlHandler(controller) {
@@ -113,13 +166,6 @@ export function createScheduleTaskControlHandler(controller) {
         },
     };
 }
-function targetFromSource(source) {
-    if (source.scope === 'private')
-        return { scope: 'private', targetId: source.userId };
-    if (source.groupId === undefined)
-        throw new Error('群聊定时任务缺少 groupId。');
-    return { scope: 'group', targetId: source.groupId };
-}
 function formatScheduledTaskPrompt(task) {
     return [
         '本条消息由 dsh-qq-bridge 插件内定时任务触发。',
@@ -132,3 +178,20 @@ function formatScheduledTaskPrompt(task) {
         task.message,
     ].join('\n');
 }
+function taskFromRecord(record, runAt) {
+    return {
+        id: record.uuid,
+        sessionKey: record.sessionKey,
+        target: { scope: record.scope, targetId: record.targetId },
+        runAt,
+        runAtText: record.time,
+        message: record.content,
+    };
+}
+const fallbackStore = {
+    async saveTimer() { },
+    async listTimers() { return []; },
+    async updateTimer() { },
+    async saveMemo() { },
+    async listMemos() { return []; },
+};

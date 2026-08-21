@@ -1,5 +1,6 @@
 import { Handler, HandlerContext } from '../router.js';
 import { QqControlDispatcher } from './control.js';
+import { AgentRunGate } from '../web-activity.js';
 export declare const DEFAULT_QQ_REPLY_STYLE_SKILL_NAME = "qq-session-reply-style";
 export interface QqReplyStyleSkillOptions {
     enabled?: boolean;
@@ -56,11 +57,16 @@ export declare class AgentRpcHandler implements Handler {
         reservedCommands?: readonly string[];
         /** Assistant 输出控制块的执行器。存在时会先解析最终文本再回发。 */
         controlDispatcher?: QqControlDispatcher;
+        /** Web session 正在运行时,延后 QQ agent run 的全局 gate。 */
+        webActivityGate?: AgentRunGate;
+        /** Web session 忙时先回发给 QQ 的提示。 */
+        webBusyMessage?: string;
     });
     test(payload: string): boolean;
     /** 把一段文本按 maxLen 切分后逐条回发。 */
     private respondChunk;
     run(ctx: HandlerContext): Promise<void>;
+    private runAgentTurn;
     private nextQqStyleSkillInjection;
     private respondAgentOutput;
 }

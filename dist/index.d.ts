@@ -20,10 +20,14 @@ export { BridgeControlHandler, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, Mode
 export type { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, ModelSelectionController, PermissionController, } from './handlers/model-control.js';
 export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, parseQqControlBlocks, } from './handlers/control.js';
 export type { ParsedQqControls, QqControlAction, QqControlActionHandler, QqControlContext, } from './handlers/control.js';
+export { InMemoryCustomMemoryStore, LazyCustomMemoryStore, StorageDomainCustomMemoryStore, createSaveMemoControlHandler, customMemoryDomainSpec, customMemoryMemoSchema, customMemoryTimerSchema, } from './handlers/custom-memory.js';
+export type { CustomMemoryMemoRecord, CustomMemoryRecordStatus, CustomMemoryStore, CustomMemoryTarget, CustomMemoryTimerRecord, DshKvTable, DshStorageDomain, DshStorageDomainRuntime, } from './handlers/custom-memory.js';
 export { InMemoryTaskScheduler, createScheduleTaskControlHandler, } from './handlers/scheduler.js';
 export type { InMemoryTaskSchedulerOptions, ScheduledTask, ScheduledTaskController, ScheduledTaskReceipt, ScheduledTaskTarget, } from './handlers/scheduler.js';
 export { ShellHandler } from './handlers/shell.js';
 export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.js';
+export { DshWebActivityGate, trackedWebSessionId } from './web-activity.js';
+export type { AgentRunGate } from './web-activity.js';
 export { DshQqBridgeConfig } from './config.js';
 export type * from './config.js';
 export { buildConnectGuidance } from './plugin.js';

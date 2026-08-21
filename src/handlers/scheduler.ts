@@ -1,10 +1,15 @@
-import { randomUUID } from 'node:crypto'
 import { AgentExecutor, splitText } from './agent.js'
 import { parseQqControlBlocks, QqControlActionHandler } from './control.js'
 import { HandlerContext } from '../router.js'
 import type { MessageTargetId } from '../onebot/types.js'
+import {
+  createTimerRecord,
+  CustomMemoryStore,
+  CustomMemoryTimerRecord,
+} from './custom-memory.js'
 
 const MAX_TIMEOUT_MS = 2_147_483_647
+const DEFAULT_SCAN_WINDOW_MS = 2 * 60 * 60 * 1000
 
 export interface ScheduledTaskTarget {
   scope: 'private' | 'group'
@@ -36,9 +41,12 @@ export interface ScheduledTaskController {
 
 export interface InMemoryTaskSchedulerOptions {
   executor: AgentExecutor
+  store?: CustomMemoryStore
   send(target: ScheduledTaskTarget, text: string): Promise<void>
   now?: () => number
   maxMessageLength?: number
+  scanWindowMs?: number
+  scanIntervalMs?: number
 }
 
 interface ScheduledTaskEntry {
@@ -49,6 +57,7 @@ interface ScheduledTaskEntry {
 
 export class InMemoryTaskScheduler implements ScheduledTaskController {
   private readonly tasks = new Map<string, ScheduledTaskEntry>()
+  private scanTimer?: ReturnType<typeof setInterval>
 
   constructor(private readonly opts: InMemoryTaskSchedulerOptions) {}
 
@@ -68,22 +77,37 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
     if (!Number.isFinite(time)) throw new Error(`无法解析定时任务时间: ${runAtText}`)
     if (time <= this.now()) throw new Error(`定时任务时间必须晚于当前时间: ${runAtText}`)
 
-    const target = targetFromSource(input.source)
-    const task: ScheduledTask = {
-      id: randomUUID(),
+    const record = createTimerRecord({
+      source: input.source,
       sessionKey: input.sessionKey,
-      target,
-      runAt,
-      runAtText,
-      message,
+      time: runAtText,
+      content: message,
+      now: this.opts.now,
+    })
+    await this.store().saveTimer(record)
+    this.armIfWithinWindow(record)
+    return { id: record.uuid, runAtText }
+  }
+
+  startScanning(): void {
+    if (this.scanTimer) return
+    void this.scanDueTasks()
+    this.scanTimer = setInterval(() => {
+      void this.scanDueTasks()
+    }, this.opts.scanIntervalMs ?? DEFAULT_SCAN_WINDOW_MS)
+  }
+
+  async scanDueTasks(): Promise<void> {
+    const timers = await this.store().listTimers()
+    for (const timer of timers) {
+      if (timer.status !== 'pending') continue
+      this.armIfWithinWindow(timer)
     }
-    const entry: ScheduledTaskEntry = { task, disposed: false }
-    this.tasks.set(task.id, entry)
-    this.arm(entry)
-    return { id: task.id, runAtText }
   }
 
   dispose(): void {
+    if (this.scanTimer) clearInterval(this.scanTimer)
+    this.scanTimer = undefined
     for (const entry of this.tasks.values()) {
       entry.disposed = true
       if (entry.timer) clearTimeout(entry.timer)
@@ -93,6 +117,18 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
 
   get size(): number {
     return this.tasks.size
+  }
+
+  private armIfWithinWindow(record: CustomMemoryTimerRecord): void {
+    const runAt = new Date(record.time)
+    const time = runAt.getTime()
+    if (!Number.isFinite(time)) return
+    if (time - this.now() > this.scanWindowMs()) return
+    const task = taskFromRecord(record, runAt)
+    if (this.tasks.has(task.id)) return
+    const entry: ScheduledTaskEntry = { task, disposed: false }
+    this.tasks.set(task.id, entry)
+    this.arm(entry)
   }
 
   private arm(entry: ScheduledTaskEntry): void {
@@ -112,7 +148,9 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
     try {
       const result = await this.opts.executor.run(entry.task.sessionKey, formatScheduledTaskPrompt(entry.task))
       await this.sendAgentResult(entry.task.target, result || '(no output)')
+      await this.markTask(entry.task.id, 'fired')
     } catch (err) {
+      await this.markTask(entry.task.id, 'failed', err instanceof Error ? err.message : String(err))
       await this.sendChunks(
         entry.task.target,
         `定时任务执行失败: ${err instanceof Error ? err.message : String(err)}`,
@@ -138,6 +176,27 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
 
   private now(): number {
     return this.opts.now?.() ?? Date.now()
+  }
+
+  private scanWindowMs(): number {
+    return this.opts.scanWindowMs ?? DEFAULT_SCAN_WINDOW_MS
+  }
+
+  private store(): CustomMemoryStore {
+    return this.opts.store ?? fallbackStore
+  }
+
+  private async markTask(id: string, status: 'fired' | 'failed', error?: string): Promise<void> {
+    const store = this.store()
+    const current = (await store.listTimers()).find(timer => timer.uuid === id)
+    if (!current) return
+    await store.updateTimer({
+      ...current,
+      status,
+      updatedAt: new Date(this.now()).toISOString(),
+      ...(status === 'fired' ? { firedAt: new Date(this.now()).toISOString() } : {}),
+      ...(error ? { error } : {}),
+    })
   }
 }
 
@@ -166,12 +225,6 @@ export function createScheduleTaskControlHandler(controller: ScheduledTaskContro
   }
 }
 
-function targetFromSource(source: HandlerContext): ScheduledTaskTarget {
-  if (source.scope === 'private') return { scope: 'private', targetId: source.userId }
-  if (source.groupId === undefined) throw new Error('群聊定时任务缺少 groupId。')
-  return { scope: 'group', targetId: source.groupId }
-}
-
 function formatScheduledTaskPrompt(task: ScheduledTask): string {
   return [
     '本条消息由 dsh-qq-bridge 插件内定时任务触发。',
@@ -183,4 +236,23 @@ function formatScheduledTaskPrompt(task: ScheduledTask): string {
     '定时任务内容:',
     task.message,
   ].join('\n')
+}
+
+function taskFromRecord(record: CustomMemoryTimerRecord, runAt: Date): ScheduledTask {
+  return {
+    id: record.uuid,
+    sessionKey: record.sessionKey,
+    target: { scope: record.scope, targetId: record.targetId },
+    runAt,
+    runAtText: record.time,
+    message: record.content,
+  }
+}
+
+const fallbackStore: CustomMemoryStore = {
+  async saveTimer() {},
+  async listTimers() { return [] },
+  async updateTimer() {},
+  async saveMemo() {},
+  async listMemos() { return [] },
 }

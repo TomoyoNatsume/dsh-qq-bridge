@@ -51,6 +51,25 @@ export type {
   QqControlContext,
 } from './handlers/control.js'
 export {
+  InMemoryCustomMemoryStore,
+  LazyCustomMemoryStore,
+  StorageDomainCustomMemoryStore,
+  createSaveMemoControlHandler,
+  customMemoryDomainSpec,
+  customMemoryMemoSchema,
+  customMemoryTimerSchema,
+} from './handlers/custom-memory.js'
+export type {
+  CustomMemoryMemoRecord,
+  CustomMemoryRecordStatus,
+  CustomMemoryStore,
+  CustomMemoryTarget,
+  CustomMemoryTimerRecord,
+  DshKvTable,
+  DshStorageDomain,
+  DshStorageDomainRuntime,
+} from './handlers/custom-memory.js'
+export {
   InMemoryTaskScheduler,
   createScheduleTaskControlHandler,
 } from './handlers/scheduler.js'
@@ -63,6 +82,8 @@ export type {
 } from './handlers/scheduler.js'
 export { ShellHandler } from './handlers/shell.js'
 export { NapcatSelfLogInput, parseNapcatSelfLogLine } from './inputs/napcat-log.js'
+export { DshWebActivityGate, trackedWebSessionId } from './web-activity.js'
+export type { AgentRunGate } from './web-activity.js'
 export { DshQqBridgeConfig } from './config.js'
 export type * from './config.js'
 export { buildConnectGuidance } from './plugin.js'
