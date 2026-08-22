@@ -4,7 +4,7 @@ import { MessageRouter } from './router.js';
 import { AccessGate } from './security.js';
 import { AgentRpcHandler } from './handlers/agent.js';
 import { DshAgentExecutor } from './handlers/dsh-executor.js';
-import { DIR_COMMAND } from './handlers/directory.js';
+import { DIR_COMMAND, resolveUserPath } from './handlers/directory.js';
 import { createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, QqControlDispatcher, } from './handlers/control.js';
 import { createSaveMemoControlHandler, LazyCustomMemoryStore } from './handlers/custom-memory.js';
 import { createScheduleTaskControlHandler, InMemoryTaskScheduler } from './handlers/scheduler.js';
@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { TencentOfficialBotClient } from './official/client.js';
 import { QqInteractionBridge } from './interactions.js';
 import { DshWebActivityGate } from './web-activity.js';
+import { installQqBridgeSettings } from './settings.js';
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
@@ -24,7 +25,70 @@ import { DshWebActivityGate } from './web-activity.js';
 export const name = 'dsh-qq-bridge';
 export const inject = ['agentLoop', 'agentPresets', 'sessionQuery'];
 export async function apply(ctx, options) {
-    const cfg = DshQqBridgeConfig.parse(options);
+    const entry = DshQqBridgeConfig.parse(options);
+    const runtime = createBridgeRuntime(ctx);
+    const settings = await installQqBridgeSettings(ctx, entry, (next) => runtime.reconcile(next));
+    await runtime.reconcile(DshQqBridgeConfig.parse(settings?.current() ?? entry));
+    return async () => {
+        settings?.dispose();
+        await runtime.dispose();
+    };
+}
+function createBridgeRuntime(ctx) {
+    let stop;
+    let activeKey = '';
+    let revision = 0;
+    return {
+        async reconcile(cfg) {
+            const nextRevision = ++revision;
+            const nextKey = JSON.stringify(cfg);
+            if (!isBridgeConfigured(cfg)) {
+                if (stop) {
+                    const previous = stop;
+                    stop = undefined;
+                    activeKey = '';
+                    await previous();
+                }
+                else if (activeKey === '') {
+                    console.info('[dsh-qq-bridge] QQ bridge is not enabled or is missing required settings; configure it from DSH Web settings.');
+                }
+                return;
+            }
+            if (stop && activeKey === nextKey)
+                return;
+            if (stop) {
+                const previous = stop;
+                stop = undefined;
+                activeKey = '';
+                await previous();
+            }
+            try {
+                const nextStop = await startQqBridge(ctx, cfg);
+                if (nextRevision !== revision) {
+                    await nextStop();
+                    return;
+                }
+                stop = nextStop;
+                activeKey = nextKey;
+                console.info('[dsh-qq-bridge] QQ bridge started from saved settings.');
+            }
+            catch (err) {
+                activeKey = '';
+                console.warn(`[dsh-qq-bridge] failed to start QQ bridge from saved settings: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        },
+        async dispose() {
+            revision += 1;
+            if (!stop)
+                return;
+            const previous = stop;
+            stop = undefined;
+            activeKey = '';
+            await previous();
+        },
+    };
+}
+async function startQqBridge(ctx, cfg) {
     assertPlatformConfig(cfg);
     const officialMode = cfg.platform === 'official';
     const adminTarget = officialMode ? cfg.official.adminOpenId : cfg.access.adminQq;
@@ -110,7 +174,7 @@ export async function apply(ctx, options) {
     });
     let selfLogInput;
     if (!officialMode && cfg.selfLogInput.enabled) {
-        const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`;
+        const logPath = cfg.selfLogInput.logPath?.trim() || `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`;
         selfLogInput = new NapcatSelfLogInput({
             logPath,
             selfQq: cfg.access.adminQq,
@@ -149,7 +213,7 @@ export function agentReplyNotificationsEnabled(cfg) {
 function makeDshExecutor(ctx, agentCfg, interactions, attachWorkspace, llm, commands) {
     const handles = wireDsh(ctx, agentCfg, interactions, attachWorkspace);
     const modelOptions = {
-        defaultCwd: agentCfg?.cwd,
+        defaultCwd: agentCfg?.cwd ? resolveUserPath(agentCfg.cwd) : undefined,
         defaultProvider: agentCfg?.provider,
         defaultModel: agentCfg?.model,
         models: agentCfg?.models,
@@ -551,6 +615,18 @@ function assertPlatformConfig(cfg) {
     if (cfg.access.mode === 'whitelist' && !cfg.official.adminOpenId.trim()) {
         throw new Error('dsh-qq-bridge: official.adminOpenId is required in whitelist mode');
     }
+}
+function isBridgeConfigured(cfg) {
+    if (!cfg.enabled)
+        return false;
+    if (cfg.platform === 'official') {
+        if (!cfg.official.appId.trim())
+            return false;
+        if (!cfg.official.appSecret.trim())
+            return false;
+        return cfg.access.mode !== 'whitelist' || cfg.official.adminOpenId.trim() !== '';
+    }
+    return cfg.access.adminQq > 0;
 }
 export function createAgentReplyNotifier(ctx, client, adminTarget) {
     if (!ctx.on || adminTarget === '' || adminTarget === 0)

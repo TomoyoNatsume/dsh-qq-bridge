@@ -1,0 +1,37 @@
+# dsh-qq-bridge bundle patch. Installation adds this package to
+# dsh.profile.bundles, but the bridge stays inert until the user enables it
+# from DSH Web Settings > QQ bridge or runs the CLI setup.
+- insert:
+    - id: dsh-qq-bridge
+      name: 'dsh-qq-bridge'
+      config:
+        enabled: false
+        platform: napcat
+        napcat:
+          loginQq: 0
+          wsUrl: ws://127.0.0.1:3001
+        access:
+          adminQq: 0
+          allowlist: []
+          commandPrefix: ""
+          mode: whitelist
+        agent:
+          preset: dsh-qq-bridge
+          provider: deepseek-official
+          model: deepseek-v4-flash
+          cwd: "~"
+          streamReasoning: false
+          maxMessageLength: 4500
+          ackMessage: 收到，正在处理...
+          timeoutMs: 120000
+          timeoutMessage: agent 无响应，请稍后重试。
+          qqReplyStyleSkill:
+            enabled: true
+            skillName: qq-session-reply-style
+        shell:
+          enabled: false
+        notifications:
+          agentReply:
+            enabled: true
+        selfLogInput:
+          enabled: false

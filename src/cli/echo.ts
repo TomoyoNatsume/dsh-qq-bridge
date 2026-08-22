@@ -83,7 +83,7 @@ export function runEcho(): void {
 
   let selfLogInput: NapcatSelfLogInput | undefined
   if (cfg.selfLogInput.enabled) {
-    const logPath = cfg.selfLogInput.logPath ?? `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`
+    const logPath = cfg.selfLogInput.logPath?.trim() || `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`
     selfLogInput = new NapcatSelfLogInput({
       logPath,
       selfQq: cfg.access.adminQq,

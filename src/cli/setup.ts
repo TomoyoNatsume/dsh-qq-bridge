@@ -30,7 +30,6 @@ import {
   waitForOnebotWsEndpoint,
 } from './napcat.js'
 import { isPromptCancelledError, parseQq, Prompter } from './prompt.js'
-import { startDshWebBackground } from './dsh-runner.js'
 
 type SetupPlatformChoice = 'NapCat / OneBot' | '腾讯官方 QQ Bot'
 type PermissionDefaultChoice = 'workspace-write' | 'danger-full-access' | '保持现有 settings.yaml'
@@ -39,7 +38,6 @@ const ONEBOT_WS_URL = 'ws://127.0.0.1:3001'
 interface CommonSetupAnswers {
   commandPrefix: string
   model: string
-  dshCheckout: string
   agentCwd: string
   permissionDefault: PermissionDefaultChoice
 }
@@ -132,18 +130,14 @@ async function runNapcatSetup(prompt: Prompter): Promise<void> {
   await configureDshProfile(answers, logPath, napcat.token)
   await configureDshSettings(answers.permissionDefault)
   if (!napcat.onebotReady) {
-    console.log('\n已写入 DSH profile，但 OneBot WS 当前不可连接，因此跳过启动 DSH web。')
+    console.log('\n已写入 DSH profile，但 OneBot WS 当前不可连接。')
     printNapcatRecoveryGuidance(answers.napcatQq)
     process.exitCode = 1
     return
   }
-  await maybeStartDshWeb(
-    prompt,
-    answers.dshCheckout,
-    () => printVerifyGuidance(answers),
-    () => printVerifyGuidance(answers, '启动后'),
+  printRestartDshWebGuidance(
+    () => printVerifyGuidance(answers, '重启后请'),
     `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。`,
-    '如果没有响应，请查看 NapCat 日志确认 QQ 是否登录成功。',
   )
 }
 
@@ -192,13 +186,9 @@ async function runOfficialSetup(prompt: Prompter): Promise<void> {
 
   await configureOfficialDshProfile(answers, adminOpenId)
   await configureDshSettings(answers.permissionDefault)
-  await maybeStartDshWeb(
-    prompt,
-    answers.dshCheckout,
-    () => printOfficialVerifyGuidance(answers),
-    () => printOfficialVerifyGuidance(answers, '启动后'),
+  printRestartDshWebGuidance(
+    () => printOfficialVerifyGuidance(answers, '重启后请'),
     `如果发送 ${formatCommandExample(answers.commandPrefix, 'ping')} 后没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。`,
-    '如果没有响应，请查看 DSH web 日志和 QQ 开放平台机器人状态。',
   )
 }
 
@@ -222,18 +212,13 @@ async function collectOfficialAnswers(prompt: Prompter): Promise<OfficialSetupAn
 async function collectCommonAnswers(prompt: Prompter): Promise<CommonSetupAnswers> {
   const commandPrefix = await prompt.text('设置发送指令时的前缀（默认空: 不需要前缀，白名单用户的所有消息都会进入 Agent）', '')
   const model = await prompt.choice('选择模型', ['deepseek-v4-flash', 'deepseek-v4-pro'], 'deepseek-v4-flash')
-  const dshCheckout = await promptExistingDirectory(
-    prompt,
-    'DSH / deepseek-harness 目录',
-    process.env.DSH_CHECKOUT ?? join(homedir(), 'deepseek-harness'),
-  )
   const agentCwd = await promptExistingDirectory(
     prompt,
     'QQ Agent 默认工作目录',
     '~',
   )
   const permissionDefault = await promptPermissionDefault(prompt)
-  return { commandPrefix, model, dshCheckout, agentCwd, permissionDefault }
+  return { commandPrefix, model, agentCwd, permissionDefault }
 }
 
 async function promptRequiredText(prompt: Prompter, label: string): Promise<string> {
@@ -349,56 +334,6 @@ async function configureDshSettings(permissionDefault: PermissionDefaultChoice):
   console.log(`\n写入 DSH 默认权限设置: ${settingsPath}`)
   const backup = await writeSettingsWithBackup(settingsPath, update.content, settingsBackupPath())
   console.log(`已写入 settings。备份: ${backup}`)
-}
-
-async function maybeStartDshWeb(
-  prompt: Prompter,
-  dshCheckout: string,
-  printStartedVerify: () => void,
-  printManualVerify: () => void,
-  startedNoResponseHint: string,
-  manualNoResponseHint: string,
-): Promise<void> {
-  if (await prompt.confirm('是否后台启动 DSH web', true)) {
-    const result = await startDshWebBackground({
-      cwd: dshCheckout,
-    })
-    if (result.alreadyRunning && result.ready) {
-      console.log(`检测到 DSH web 已在运行: ${result.url}`)
-      if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
-      console.log('已跳过后台启动，避免重复启动多个 DSH web。')
-      console.log('setup 已写入新的 QQ bridge 配置；首次 setup 或更改配置后，请重启 DSH web 再验证 QQ 消息。')
-    } else if (result.alreadyRunning) {
-      console.log('检测到 DSH web 管理进程正在运行，但服务暂不可访问。')
-      if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
-      console.log(`地址: ${result.url}`)
-      console.log(`日志: ${result.logPath}`)
-      console.log('请查看日志确认启动状态。')
-      console.log('setup 已写入新的 QQ bridge 配置；如果这是旧的 DSH web 进程，请重启后再验证 QQ 消息。')
-    } else if (result.ready) {
-      console.log('DSH web 后台启动成功。')
-      if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
-      console.log(`地址: ${result.url}`)
-      console.log(`日志: ${result.logPath}`)
-      console.log(`启动命令: ${result.command}`)
-    } else {
-      console.log('已尝试后台启动 DSH web。')
-      if (result.pid !== null) console.log(`管理 PID: ${result.pid}`)
-      console.log(`地址: ${result.url}`)
-      console.log(`日志: ${result.logPath}`)
-      console.log(`启动命令: ${result.command}`)
-      console.log('但 30 秒内未确认服务可访问，请查看日志确认启动状态。')
-    }
-    console.log('管理命令: dsh-qq-bridge web status | dsh-qq-bridge web logs | dsh-qq-bridge web stop')
-    printStartedVerify()
-    console.log(startedNoResponseHint)
-    printSetupRefreshGuidance()
-  } else {
-    console.log('\n之后可手动启动 DSH web。')
-    printManualVerify()
-    console.log(manualNoResponseHint)
-    printSetupRefreshGuidance()
-  }
 }
 
 async function configureNapcatEnvironment(prompt: Prompter, qq: number, napcatRoot: string): Promise<NapcatSetupResult | null> {
@@ -563,11 +498,11 @@ function printNapcatLogGuidance(qq: number, napcatRoot: string, state: NapcatLog
 }
 
 function printNapcatRecoveryGuidance(qq: number): void {
-  console.log('请先让 NapCat 稳定运行，再启动或重启 DSH web。常用命令:')
+  console.log('请先让 NapCat 稳定运行，再手动重启 DSH web。常用命令:')
   console.log(`  napcat status ${qq}`)
   console.log(`  napcat start ${qq}`)
   console.log(`  napcat log ${qq}`)
-  console.log(`确认日志中出现 OneBot WebSocket 服务已启动后，再运行: dsh-qq-bridge setup`)
+  console.log('确认日志中出现 OneBot WebSocket 服务已启动后，再重启 dsh web。')
   console.log('如果日志中出现 Electron / X connection / FATAL，请先处理 NapCat 进程崩溃或图形环境问题。')
 }
 
@@ -589,6 +524,14 @@ function printVerifyGuidance(answers: SetupAnswers, prefix = '请'): void {
 
 function printOfficialVerifyGuidance(answers: OfficialSetupAnswers, prefix = '请'): void {
   console.log(`${prefix}用刚才配对的 QQ 给官方机器人发送: ${formatCommandExample(answers.commandPrefix, 'ping')}`)
+}
+
+function printRestartDshWebGuidance(printVerify: () => void, noResponseHint: string): void {
+  console.log('\nsetup 已写入新的 QQ bridge 配置。')
+  console.log('请手动重启 dsh web 后再验证 QQ 消息。')
+  printVerify()
+  console.log(noResponseHint)
+  printSetupRefreshGuidance()
 }
 
 function formatCommandExample(commandPrefix: string, payload: string): string {

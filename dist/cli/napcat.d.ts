@@ -34,6 +34,7 @@ export declare function defaultNapcatLogDir(rootPath?: string): string;
 export declare function defaultNapcatLogPath(qq: number, rootPath?: string): string;
 export declare function defaultOnebotConfigPath(qq: number, rootPath?: string): string;
 export declare function tryReadOnebotToken(path: string): Promise<string | null>;
+export declare function tryReadOnebotServer(path: string): Promise<OneBotServerSummary | null>;
 export declare function updateOnebotConfigFile(path: string): Promise<OneBotConfigUpdate>;
 export declare function waitForOnebotWsEndpoint(options: OnebotWsEndpointCheckOptions): Promise<OnebotWsEndpointCheckResult>;
 export declare function updateOnebotConfig(raw: string): OneBotConfigUpdate;

@@ -68,7 +68,7 @@ function printHelp() {
 
 Usage:
   dsh-qq-bridge setup     interactive Linux/WSL2 setup wizard
-  dsh-qq-bridge web       manage setup-started DSH web background process
+  dsh-qq-bridge web       manage legacy setup-started DSH web background process
   dsh-qq-bridge echo      local QQ echo link test
   dsh-qq-bridge --help    show this help
 
@@ -80,13 +80,14 @@ function printSetupHelp() {
 Interactive setup wizard for Linux/WSL2 + NapCat CLI or Tencent official QQ Bot.
 
 It previews and writes the DSH web profile, configures either
-NapCat/OneBot or an official QQ Bot pairing, and optionally starts
-DSH web.`);
+NapCat/OneBot or an official QQ Bot pairing.
+
+After setup finishes, restart dsh web manually to load the new config.`);
 }
 function printWebHelp() {
     console.log(`dsh-qq-bridge web
 
-Manage the DSH web process started by setup.
+Manage a legacy DSH web background process started by older setup versions.
 
 Usage:
   dsh-qq-bridge web status   show pid, url, and log path

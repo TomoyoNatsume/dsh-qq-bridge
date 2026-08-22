@@ -5,12 +5,14 @@ import { join } from 'node:path'
 import {
   buildBridgeInsertItem,
   buildOfficialBridgeInsertItem,
+  removeInsertItem,
   updateProfilePatch,
   updateSetupProfilePatch,
   writeProfilePatchWithBackup,
 } from '../src/cli/dsh-profile.js'
 import { updatePermissionDefaultPreset, writeSettingsWithBackup } from '../src/cli/dsh-settings.js'
 import { installQqBridgePreset } from '../src/cli/qq-preset.js'
+import { cleanupLegacyProfileInsert } from '../src/settings.js'
 
 const item = buildBridgeInsertItem(itemConfig())
 
@@ -171,6 +173,79 @@ describe('setup profile patch updater', () => {
 
     expect(result.content.startsWith('- insert:\n    - id: dsh-qq-bridge')).toBe(true)
     expect(result.content.startsWith('[]')).toBe(false)
+  })
+
+  it('removes only the legacy bridge insert item when siblings remain', () => {
+    const before = [
+      '- insert:',
+      '    - id: other-plugin',
+      '      name: other',
+      '    - id: dsh-qq-bridge',
+      '      name: old',
+      '      config:',
+      '        enabled: true',
+      '    - id: after-plugin',
+      '      name: after',
+      '',
+    ].join('\n')
+
+    const result = removeInsertItem(before, 'dsh-qq-bridge')
+
+    expect(result.changed).toBe(true)
+    expect(result.content).toContain('- insert:\n    - id: other-plugin')
+    expect(result.content).toContain('    - id: after-plugin\n      name: after')
+    expect(result.content).not.toContain('dsh-qq-bridge')
+    expect(result.content).not.toContain('enabled: true')
+  })
+
+  it('removes the whole insert operation when the legacy bridge item was the only child', () => {
+    const before = [
+      '- insert:',
+      '    - id: dsh-qq-bridge',
+      '      name: old',
+      '      config:',
+      '        enabled: true',
+      '',
+      '- id: tail',
+      '  config:',
+      '    keep: true',
+      '',
+    ].join('\n')
+
+    const result = removeInsertItem(before, 'dsh-qq-bridge')
+
+    expect(result.changed).toBe(true)
+    expect(result.content).not.toContain('- insert:')
+    expect(result.content).not.toContain('dsh-qq-bridge')
+    expect(result.content).toContain('- id: tail\n  config:\n    keep: true')
+  })
+
+  it('cleans the legacy web profile insert and writes an adjacent backup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-legacy-profile-'))
+    const profileDir = join(dir, 'profiles', 'web')
+    const profilePath = join(profileDir, 'cordis.patch.yml')
+    const backupPath = join(profileDir, 'cordis.patch.yml.dsh-qq-bridge.bak')
+    const before = [
+      '- insert:',
+      '    - id: dsh-qq-bridge',
+      '      name: old',
+      '      config:',
+      '        enabled: true',
+      '',
+    ].join('\n')
+    await mkdir(profileDir, { recursive: true })
+    await writeFile(profilePath, before, 'utf8')
+
+    await expect(cleanupLegacyProfileInsert(dir)).resolves.toBe(true)
+
+    expect(await readFile(backupPath, 'utf8')).toBe(before)
+    expect(await readFile(profilePath, 'utf8')).not.toContain('dsh-qq-bridge')
+  })
+
+  it('does not create a legacy cleanup file when the web profile is absent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-no-legacy-profile-'))
+
+    await expect(cleanupLegacyProfileInsert(dir)).resolves.toBe(false)
   })
 
   it('writes a single fixed profile backup that is replaced by the next setup write', async () => {

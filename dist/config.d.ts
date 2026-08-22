@@ -1,16 +1,22 @@
 import { z } from 'zod';
 declare const DshQqBridgeConfig: z.ZodObject<{
+    /** Bundle 默认保持 inert；setup 或 Web 设置保存后显式启用。 */
+    enabled: z.ZodDefault<z.ZodBoolean>;
     platform: z.ZodDefault<z.ZodEnum<["napcat", "official"]>>;
     napcat: z.ZodDefault<z.ZodObject<{
+        /** NapCat 登录端 QQ；双号模式下与发送端 QQ 不同，仅用于 Web 设置页检测本机 NapCat。 */
+        loginQq: z.ZodDefault<z.ZodNumber>;
         wsUrl: z.ZodDefault<z.ZodString>;
         token: z.ZodOptional<z.ZodString>;
         /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
         guideDoc: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
+        loginQq: number;
         wsUrl: string;
         guideDoc: string;
         token?: string | undefined;
     }, {
+        loginQq?: number | undefined;
         wsUrl?: string | undefined;
         token?: string | undefined;
         guideDoc?: string | undefined;
@@ -64,8 +70,8 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         model: z.ZodDefault<z.ZodString>;
         /** 当 DSH llm 服务不可用时,bridge 侧 /models 的降级候选列表。 */
         models: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
-        cwd: z.ZodOptional<z.ZodString>;
+        /** QQ Agent 默认工作目录;支持 ~ 表示当前用户 home。 */
+        cwd: z.ZodDefault<z.ZodString>;
         /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
         streamText: z.ZodDefault<z.ZodBoolean>;
         /** streamText=true 时,是否把思考过程(reasoning)也分段回发。默认 false。 */
@@ -94,6 +100,7 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         preset: string;
         provider: string;
         models: string[];
+        cwd: string;
         streamText: boolean;
         streamReasoning: boolean;
         maxMessageLength: number;
@@ -104,7 +111,6 @@ declare const DshQqBridgeConfig: z.ZodObject<{
             enabled: boolean;
             skillName: string;
         };
-        cwd?: string | undefined;
     }, {
         model?: string | undefined;
         preset?: string | undefined;
@@ -180,6 +186,7 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         preset: string;
         provider: string;
         models: string[];
+        cwd: string;
         streamText: boolean;
         streamReasoning: boolean;
         maxMessageLength: number;
@@ -190,9 +197,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
             enabled: boolean;
             skillName: string;
         };
-        cwd?: string | undefined;
     };
+    enabled: boolean;
     napcat: {
+        loginQq: number;
         wsUrl: string;
         guideDoc: string;
         token?: string | undefined;
@@ -243,7 +251,9 @@ declare const DshQqBridgeConfig: z.ZodObject<{
             skillName?: string | undefined;
         } | undefined;
     } | undefined;
+    enabled?: boolean | undefined;
     napcat?: {
+        loginQq?: number | undefined;
         wsUrl?: string | undefined;
         token?: string | undefined;
         guideDoc?: string | undefined;

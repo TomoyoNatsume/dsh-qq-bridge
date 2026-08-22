@@ -56,6 +56,7 @@ export function buildBridgeInsertItem(cfg: BridgeProfileConfig): string {
     `    - id: ${BRIDGE_ID}`,
     `      name: ${cfg.pluginName}`,
     '      config:',
+    '        enabled: true',
     '        platform: napcat',
     '        napcat:',
     `          wsUrl: ${cfg.wsUrl}`,
@@ -89,6 +90,7 @@ export function buildOfficialBridgeInsertItem(cfg: OfficialBridgeProfileConfig):
     `    - id: ${BRIDGE_ID}`,
     `      name: ${cfg.pluginName}`,
     '      config:',
+    '        enabled: true',
     '        platform: official',
     '        official:',
     `          appId: ${yamlQuote(cfg.appId)}`,
@@ -160,6 +162,8 @@ export function removeInsertItem(content: string, itemId: string): ProfileUpdate
     if (!found) break
   }
 
+  if (removed) lines = removeEmptyInsertBlocks(lines)
+
   const next = trimTrailingBlankLines(lines).join('\n') + '\n'
   return {
     changed: removed,
@@ -167,6 +171,18 @@ export function removeInsertItem(content: string, itemId: string): ProfileUpdate
     preview: makePreview(normalized, next),
     action: removed ? 'replaced' : 'unchanged',
   }
+}
+
+function removeEmptyInsertBlocks(lines: string[]): string[] {
+  let next = [...lines]
+  const ranges = findTopLevelInsertRanges(next)
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    const range = ranges[i]
+    const hasContent = next.slice(range.start + 1, range.end).some((line) => line.trim() !== '')
+    if (hasContent) continue
+    next = [...next.slice(0, range.start), ...next.slice(range.end)]
+  }
+  return next
 }
 
 export function updateProfilePatch(content: string, item: string, itemId = BRIDGE_ID): ProfileUpdateResult {

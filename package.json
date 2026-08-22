@@ -6,6 +6,17 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "dsh-qq-bridge": "dist/main.js"
   },
@@ -15,6 +26,7 @@
   "files": [
     "dist",
     "agent-presets",
+    "cordis.patch.yml",
     "scripts/postbuild.js",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -34,11 +46,35 @@
     "onebot",
     "agent"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "platform": "web"
+    }
+  },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
     "@tencent-connect/qqbot-nodejs": "^1.0.4",
+    "schemastery": "^3.18.0",
     "ws": "^8.17.0",
     "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.8",
+    "react": "^18.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

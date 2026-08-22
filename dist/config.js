@@ -1,8 +1,12 @@
 import { z } from 'zod';
 import { DEFAULT_QQ_REPLY_STYLE_SKILL_NAME } from './handlers/agent.js';
 const DshQqBridgeConfig = z.object({
+    /** Bundle 默认保持 inert；setup 或 Web 设置保存后显式启用。 */
+    enabled: z.boolean().default(false),
     platform: z.enum(['napcat', 'official']).default('napcat'),
     napcat: z.object({
+        /** NapCat 登录端 QQ；双号模式下与发送端 QQ 不同，仅用于 Web 设置页检测本机 NapCat。 */
+        loginQq: z.number().int().nonnegative().default(0),
         wsUrl: z.string().url().default('ws://127.0.0.1:3001'),
         token: z.string().optional(),
         /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
@@ -40,8 +44,8 @@ const DshQqBridgeConfig = z.object({
         model: z.string().default('deepseek-v4-flash'),
         /** 当 DSH llm 服务不可用时,bridge 侧 /models 的降级候选列表。 */
         models: z.array(z.string()).default([]),
-        /** QQ Agent 默认工作目录;为空时使用 DSH web 启动目录。 */
-        cwd: z.string().optional(),
+        /** QQ Agent 默认工作目录;支持 ~ 表示当前用户 home。 */
+        cwd: z.string().default('~'),
         /** 是否边生成边回发 text 分段。默认 false:等待本轮完成后只回发最终回复。 */
         streamText: z.boolean().default(false),
         /** streamText=true 时,是否把思考过程(reasoning)也分段回发。默认 false。 */

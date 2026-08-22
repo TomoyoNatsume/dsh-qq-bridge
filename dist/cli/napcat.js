@@ -27,6 +27,27 @@ export async function tryReadOnebotToken(path) {
         return null;
     }
 }
+export async function tryReadOnebotServer(path) {
+    try {
+        const raw = await readFile(path, 'utf8');
+        const json = JSON.parse(raw);
+        const server = firstWebSocketServer(json);
+        if (server === null)
+            return null;
+        const host = typeof server.host === 'string' && server.host.trim() ? server.host.trim() : '127.0.0.1';
+        const port = typeof server.port === 'number' && Number.isFinite(server.port) ? server.port : 3001;
+        return {
+            enable: server.enable !== false,
+            host,
+            port,
+            token: typeof server.token === 'string' ? server.token : '',
+            name: typeof server.name === 'string' ? server.name : undefined,
+        };
+    }
+    catch {
+        return null;
+    }
+}
 export async function updateOnebotConfigFile(path) {
     const raw = await readFile(path, 'utf8');
     const update = updateOnebotConfig(raw);
