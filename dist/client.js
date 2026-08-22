@@ -132,7 +132,13 @@ window.__ModuleLoader__.load({
           if (!response.result.ok) {
             setMessage(response.result.error?.message || "保存失败");
           } else {
-            setDraft((prev) => setPath(prev, ["enabled"], true));
+            setDraft((prev) => {
+              let next = setPath(prev, ["enabled"], true);
+              if (draft.platform === "napcat") {
+                next = setPath(next, ["selfLogInput", "logPath"], napcatLogPathForSettings(draft, setupStatus));
+              }
+              return next;
+            });
             setDirty(false);
             if (draft.platform === "napcat") {
               setMessage(napcatLogHint(setupStatus, napcatLoginQqText(draft)));
@@ -429,8 +435,9 @@ window.__ModuleLoader__.load({
     function napcatLogPathText(status, draft) {
       const qq = napcatLoginQqText(draft).trim() || "<qq号>";
       if (status?.state === "loading") return "正在检测...";
+      if (status?.logState && status.logState !== "ready") return `找不到，请通过 napcat log ${qq} 查看`;
       if (status?.logState === "ready" && status.logPath) return status.logPath;
-      if (status?.logState) return `找不到，请通过 napcat log ${qq} 查看`;
+      if (draft.selfLogInput?.logPath?.trim()) return draft.selfLogInput.logPath.trim();
       return `保存并启动后检测；找不到时请通过 napcat log ${qq} 查看`;
     }
 
@@ -511,7 +518,7 @@ window.__ModuleLoader__.load({
 
     function opsFromDraft(draft, napcatStatus) {
       const detectedOnebot = draft.platform === "napcat" && napcatStatus?.state === "ready" ? napcatStatus.onebot : undefined;
-      const detectedLogPath = draft.platform === "napcat" && napcatStatus?.logState === "ready" ? napcatStatus.logPath : "";
+      const detectedLogPath = napcatLogPathForSettings(draft, napcatStatus);
       const loginQq = Number(napcatLoginQqText(draft)) || 0;
       const senderQq = draft.napcat.accountMode === "single" ? loginQq : Number(draft.access.adminQqText) || 0;
       const ops = [
@@ -549,6 +556,14 @@ window.__ModuleLoader__.load({
       if (detectedOnebot?.token && detectedOnebot.token.trim() !== "") ops.push(set(["napcat", "token"], detectedOnebot.token));
       if (draft.official.appSecret.trim() !== "") ops.push(set(["official", "appSecret"], draft.official.appSecret));
       return ops;
+    }
+
+    function napcatLogPathForSettings(draft, napcatStatus) {
+      if (draft.platform !== "napcat") return draft.selfLogInput?.logPath?.trim() || "";
+      if (napcatStatus?.state === "ready") {
+        return napcatStatus.logState === "ready" && napcatStatus.logPath ? napcatStatus.logPath : "";
+      }
+      return draft.selfLogInput?.logPath?.trim() || "";
     }
 
     function napcatLogHint(status, qq) {

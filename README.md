@@ -33,6 +33,11 @@
 
 ## 更新
 
+> **v1.0.0 更新：支持Web UI中配置，告别繁琐的CLI配置**
+>
+> 直接在 QQ 里对 Agent 说“请在 2026 年 9 月 1 号中午 12 点提醒我提交报告”，插件会创建一次性定时任务，到点后在同一个 QQ 会话触发 Agent 并主动发回提醒。
+
+
 > **v0.4.0 更新：支持定时提示功能!**
 >
 > 直接在 QQ 里对 Agent 说“请在 2026 年 9 月 1 号中午 12 点提醒我提交报告”，插件会创建一次性定时任务，到点后在同一个 QQ 会话触发 Agent 并主动发回提醒。
@@ -42,13 +47,13 @@
 - 控制鲸鱼娘：
 
 <p align="center">
-  <img src="docs/asset/test0.jpg" alt="控制鲸鱼娘" width="760">
+  <img src="https://raw.githubusercontent.com/TomoyoNatsume/dsh-qq-bridge/main/docs/asset/test0.jpg" alt="控制鲸鱼娘" width="760">
 </p>
 
 - web 会话完成提醒：
 
 <p align="center">
-  <img src="docs/asset/AgentReply.jpg" alt="会话完成提醒" width="760">
+  <img src="https://raw.githubusercontent.com/TomoyoNatsume/dsh-qq-bridge/main/docs/asset/AgentReply.jpg" alt="会话完成提醒" width="760">
 </p>
 
 dsh-qq-bridge 是一个 DeepSeek Harness（DSH）Web profile 插件，用来把 QQ 消息转成 DSH Agent 会话请求，再把 Agent 回复发回 QQ。最常用的链路是：
@@ -84,7 +89,13 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 ### 三步上手
 
-1. 安装插件：
+1. 安装插件（推荐 npm 稳定版）：
+
+   ```bash
+   pnpm dsh plugin --profile web add @yachangchang/dsh-qq-bridge
+   ```
+
+   也可以直接从 GitHub 安装当前仓库：
 
    ```bash
    pnpm dsh plugin --profile web add github:TomoyoNatsume/dsh-qq-bridge
@@ -95,7 +106,7 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 2. 启动 `dsh web`，进入 Web UI，打开左下角“设置”，进入 `QQ bridge`，填写 QQ 接入、管理员、Agent 模型等配置，点击“保存配置”。（NapCat 分支会检测本机是否安装并启动 NapCat，点击“保存配置”时会自动写入 OneBot 正向 WebSocket 配置和 token）
 
 <p align="center">
-  <img src="docs/asset/config.png" alt="插件配置界面" width="760">
+  <img src="https://raw.githubusercontent.com/TomoyoNatsume/dsh-qq-bridge/main/docs/asset/config.png" alt="插件配置界面" width="760">
 </p>
 
 3. 保存成功后，在 QQ 里发送：
@@ -162,7 +173,7 @@ ping
 如果是自己前台启动的 DSH web，启动成功后会看到类似界面：
 
 <p align="center">
-  <img src="docs/asset/test0.png" alt="DSH 启动成功截图" width="760">
+  <img src="https://raw.githubusercontent.com/TomoyoNatsume/dsh-qq-bridge/main/docs/asset/test0.png" alt="DSH 启动成功截图" width="760">
 </p>
 
 ## 配置
