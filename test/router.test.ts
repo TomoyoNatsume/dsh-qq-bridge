@@ -601,7 +601,24 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(sent.slice(1).join('')).toBe(longResult)
   })
 
-  it('agent 超时后回发无响应消息,不等待永久 pending 的 executor', async () => {
+  it('agent 默认不限制 QQ 对话等待时间', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    let resolveLate: ((value: string) => void) | undefined
+    const exec = { run: vi.fn(() => new Promise<string>((resolve) => { resolveLate = resolve })) }
+    router.register(new AgentRpcHandler(exec as never))
+
+    const turn = router.route(makeEvent({ user_id: 10001, raw_message: '/dsh q' }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(sent).toEqual(['收到，正在处理...'])
+
+    resolveLate?.('late result')
+    await turn
+    expect(sent).toEqual(['收到，正在处理...', 'late result'])
+  })
+
+  it('agent 显式配置超时后回发无响应消息,不等待永久 pending 的 executor', async () => {
     const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
     const sent: string[] = []
     const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))

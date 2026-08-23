@@ -69,7 +69,7 @@ export class AgentRpcHandler {
     }
     async runAgentTurn(ctx, sessionKey, payload) {
         const ackMessage = this.opts.ackMessage ?? '收到，正在处理...';
-        const timeoutMs = this.opts.timeoutMs ?? 120_000;
+        const timeoutMs = this.opts.timeoutMs;
         const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。';
         let active = true;
         try {
@@ -176,7 +176,7 @@ export class AgentTimeoutError extends Error {
     }
 }
 function withTimeout(promise, timeoutMs) {
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0)
         return promise;
     let timer;
     const timeout = new Promise((_, reject) => {

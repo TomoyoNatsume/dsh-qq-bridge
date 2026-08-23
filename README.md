@@ -256,8 +256,6 @@ agent:
   cwd: "~"
   preset: dsh-qq-bridge
   ackMessage: 收到，正在处理...
-  timeoutMs: 120000
-  timeoutMessage: agent 无响应，请稍后重试。
 ```
 
 - `provider`：DSH 里已配置好的模型提供方。
@@ -272,11 +270,17 @@ agent:
 ```yaml
 agent:
   ackMessage: 收到，正在处理...
+```
+
+默认情况下，QQ 对话不会限制 Agent 等待时间，会一直等到本轮 DSH Agent 完成。需要保留超时保护时，可手动设置 `timeoutMs` 和 `timeoutMessage`：
+
+```yaml
+agent:
   timeoutMs: 120000
   timeoutMessage: agent 无响应，请稍后重试。
 ```
 
-设置页里的超时单位是秒；手动 YAML 中的 `timeoutMs` 仍是内部毫秒字段。超时后回复 `timeoutMessage`。
+手动 YAML 中的 `timeoutMs` 是内部毫秒字段。设置 `timeoutMs` 后，超时会回复 `timeoutMessage`。
 
 ### QQ 回复风格 Skill
 

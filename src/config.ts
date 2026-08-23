@@ -55,9 +55,9 @@ const DshQqBridgeConfig = z.object({
       maxMessageLength: z.number().int().positive().default(4500),
       /** 收到有效 QQ 指令后立即回发的确认消息;设为空字符串可关闭。 */
       ackMessage: z.string().default('收到，正在处理...'),
-      /** Agent 本轮最长等待时间(ms),超时后回复 timeoutMessage。 */
-      timeoutMs: z.number().int().positive().default(120_000),
-      /** Agent 长时间无响应时回发的消息。 */
+      /** Agent 本轮最长等待时间(ms);未设置时不限制 QQ 对话等待时间。 */
+      timeoutMs: z.number().int().positive().optional(),
+      /** Agent 长时间无响应时回发的消息;仅设置 timeoutMs 后使用。 */
       timeoutMessage: z.string().default('agent 无响应，请稍后重试。'),
       /** 仅 QQ 入站消息使用的回复风格 skill,不会影响其它 DSH 会话。 */
       qqReplyStyleSkill: z

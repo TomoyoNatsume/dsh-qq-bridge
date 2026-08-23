@@ -85,7 +85,7 @@ export class AgentRpcHandler implements Handler {
       maxMessageLength?: number
       /** 收到有效指令后立即回发的确认消息;设为空字符串可关闭。 */
       ackMessage?: string
-      /** Agent 超时时间(ms);默认 120s。 */
+      /** Agent 超时时间(ms);未设置时不限制 QQ 对话等待时间。 */
       timeoutMs?: number
       /** Agent 长时间无响应时回发的消息。 */
       timeoutMessage?: string
@@ -135,7 +135,7 @@ export class AgentRpcHandler implements Handler {
 
   private async runAgentTurn(ctx: HandlerContext, sessionKey: string, payload: string): Promise<void> {
     const ackMessage = this.opts.ackMessage ?? '收到，正在处理...'
-    const timeoutMs = this.opts.timeoutMs ?? 120_000
+    const timeoutMs = this.opts.timeoutMs
     const timeoutMessage = this.opts.timeoutMessage ?? 'agent 无响应，请稍后重试。'
     let active = true
     try {
@@ -241,8 +241,8 @@ export class AgentTimeoutError extends Error {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number | undefined): Promise<T> {
+  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new AgentTimeoutError(timeoutMs)), timeoutMs)

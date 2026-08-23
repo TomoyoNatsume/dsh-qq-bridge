@@ -47,7 +47,7 @@ export declare class AgentRpcHandler implements Handler {
         maxMessageLength?: number;
         /** 收到有效指令后立即回发的确认消息;设为空字符串可关闭。 */
         ackMessage?: string;
-        /** Agent 超时时间(ms);默认 120s。 */
+        /** Agent 超时时间(ms);未设置时不限制 QQ 对话等待时间。 */
         timeoutMs?: number;
         /** Agent 长时间无响应时回发的消息。 */
         timeoutMessage?: string;

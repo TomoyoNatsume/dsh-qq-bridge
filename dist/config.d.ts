@@ -80,9 +80,9 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         maxMessageLength: z.ZodDefault<z.ZodNumber>;
         /** 收到有效 QQ 指令后立即回发的确认消息;设为空字符串可关闭。 */
         ackMessage: z.ZodDefault<z.ZodString>;
-        /** Agent 本轮最长等待时间(ms),超时后回复 timeoutMessage。 */
-        timeoutMs: z.ZodDefault<z.ZodNumber>;
-        /** Agent 长时间无响应时回发的消息。 */
+        /** Agent 本轮最长等待时间(ms);未设置时不限制 QQ 对话等待时间。 */
+        timeoutMs: z.ZodOptional<z.ZodNumber>;
+        /** Agent 长时间无响应时回发的消息;仅设置 timeoutMs 后使用。 */
         timeoutMessage: z.ZodDefault<z.ZodString>;
         /** 仅 QQ 入站消息使用的回复风格 skill,不会影响其它 DSH 会话。 */
         qqReplyStyleSkill: z.ZodDefault<z.ZodObject<{
@@ -105,12 +105,12 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         streamReasoning: boolean;
         maxMessageLength: number;
         ackMessage: string;
-        timeoutMs: number;
         timeoutMessage: string;
         qqReplyStyleSkill: {
             enabled: boolean;
             skillName: string;
         };
+        timeoutMs?: number | undefined;
     }, {
         model?: string | undefined;
         preset?: string | undefined;
@@ -191,12 +191,12 @@ declare const DshQqBridgeConfig: z.ZodObject<{
         streamReasoning: boolean;
         maxMessageLength: number;
         ackMessage: string;
-        timeoutMs: number;
         timeoutMessage: string;
         qqReplyStyleSkill: {
             enabled: boolean;
             skillName: string;
         };
+        timeoutMs?: number | undefined;
     };
     enabled: boolean;
     napcat: {

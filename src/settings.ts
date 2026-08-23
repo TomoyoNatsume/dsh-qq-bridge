@@ -63,6 +63,7 @@ type SchemaBuilder = {
   min?(value: number): SchemaBuilder
   max?(value: number): SchemaBuilder
   step?(value: number): SchemaBuilder
+  optional?(): SchemaBuilder
 }
 
 export async function installQqBridgeSettings(
@@ -211,7 +212,7 @@ async function buildQqBridgeSettingsSchema(): Promise<unknown | undefined> {
       streamReasoning: z.boolean().default(false),
       maxMessageLength: z.number().step?.(1).min?.(1).default(4500) ?? z.number().default(4500),
       ackMessage: z.string().default('收到，正在处理...'),
-      timeoutMs: z.number().step?.(1).min?.(1).default(120000) ?? z.number().default(120000),
+      timeoutMs: (z.number().step?.(1).min?.(1) ?? z.number()).optional?.() ?? z.number(),
       timeoutMessage: z.string().default('agent 无响应，请稍后重试。'),
       qqReplyStyleSkill: z.object({
         enabled: z.boolean().default(true),
