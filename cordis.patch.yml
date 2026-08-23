@@ -3,7 +3,7 @@
 # from DSH Web Settings > QQ bridge or runs the CLI setup.
 - insert:
     - id: dsh-qq-bridge
-      name: 'dsh-qq-bridge'
+      name: '@yachangchang/dsh-qq-bridge'
       config:
         enabled: false
         platform: napcat

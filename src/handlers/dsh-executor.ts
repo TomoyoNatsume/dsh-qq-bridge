@@ -6,6 +6,7 @@ import {
   ModelSelectionController,
   PermissionController,
   resolveConfiguredModels,
+  SessionLifecycleController,
 } from './model-control.js'
 
 /**
@@ -102,7 +103,7 @@ export interface DshServiceHandles {
  * - disposeAll() 在插件 teardown 时释放全部 live agent。
  * - disposeSession() 可主动丢弃某个会话(如错误恢复、会话上限)。
  */
-export class DshAgentExecutor implements AgentExecutor, PermissionController {
+export class DshAgentExecutor implements AgentExecutor, PermissionController, SessionLifecycleController {
   private agents = new Map<string, DshRenderedAgent>()
   private sessions = new Map<string, string>() // sessionKey -> sessionId
   private sessionCwds = new Map<string, string>()
@@ -199,6 +200,15 @@ export class DshAgentExecutor implements AgentExecutor, PermissionController {
     this.queues.delete(sessionKey)
   }
 
+  async startNewSession(sessionKey: string): Promise<void> {
+    this.sessionVersions.set(sessionKey, this.getSessionVersion(sessionKey) + 1)
+    await this.disposeSession(sessionKey)
+  }
+
+  getSessionVersion(sessionKey: string): number {
+    return this.sessionVersions.get(sessionKey) ?? 0
+  }
+
   getModelSelection(sessionKey: string): BridgeModelSelection {
     return this.selectionRef(sessionKey).current
   }
@@ -237,8 +247,7 @@ export class DshAgentExecutor implements AgentExecutor, PermissionController {
   /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
   async setCwd(sessionKey: string, cwd: string): Promise<void> {
     this.sessionCwds.set(sessionKey, cwd)
-    this.sessionVersions.set(sessionKey, (this.sessionVersions.get(sessionKey) ?? 0) + 1)
-    await this.disposeSession(sessionKey)
+    await this.startNewSession(sessionKey)
   }
 
   /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */

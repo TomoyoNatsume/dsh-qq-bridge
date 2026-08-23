@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises'
 import { HandlerContext } from '../router.js'
 import { DirectorySwitcher, resolveUserPath } from './directory.js'
-import type { ModelSelectionController, PermissionController } from './model-control.js'
+import type { ModelSelectionController, PermissionController, SessionLifecycleController } from './model-control.js'
 
 export const QQ_CONTROL_BLOCK_TAG = 'dsh-qq-bridge-control'
 
@@ -136,6 +136,16 @@ export function createSetPermissionControlHandler(controller: PermissionControll
         return 'QQ 控制块 set_permission 缺少 preset。'
       }
       return await controller.runPermissionCommand(ctx.sessionKey, action.preset.trim())
+    },
+  }
+}
+
+export function createNewSessionControlHandler(controller: SessionLifecycleController): QqControlActionHandler {
+  return {
+    action: 'new_session',
+    async run(_action, ctx) {
+      await controller.startNewSession(ctx.sessionKey)
+      return '已为当前 QQ 聊天新开 Agent session。下一条消息会使用新的上下文。'
     },
   }
 }

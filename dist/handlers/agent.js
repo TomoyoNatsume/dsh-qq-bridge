@@ -115,8 +115,10 @@ export class AgentRpcHandler {
     nextQqStyleSkillInjection(sessionKey) {
         if (!this.opts.qqReplyStyleSkill || this.opts.qqReplyStyleSkill.enabled === false)
             return undefined;
-        const nextTurn = (this.qqStyleSkillTurnCounts.get(sessionKey) ?? 0) + 1;
-        this.qqStyleSkillTurnCounts.set(sessionKey, nextTurn);
+        const version = this.opts.sessionVersion?.(sessionKey);
+        const countKey = version === undefined ? sessionKey : `${sessionKey}@${version}`;
+        const nextTurn = (this.qqStyleSkillTurnCounts.get(countKey) ?? 0) + 1;
+        this.qqStyleSkillTurnCounts.set(countKey, nextTurn);
         const repeat = nextTurn === 1 || nextTurn % QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL === 0;
         return {
             invokeSkill: repeat,

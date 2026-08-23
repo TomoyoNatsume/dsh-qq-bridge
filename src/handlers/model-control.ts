@@ -9,6 +9,7 @@ export const HELP_COMMAND = '/help'
 export const REASONING_EFFORT_COMMAND = '/reasoningEff'
 export const PERMISSION_COMMAND = '/permission'
 export const PERMISSIONS_COMMAND = '/permissions'
+export const NEW_SESSION_COMMAND = '/new-session'
 
 const FALLBACK_REASONING_EFFORTS = ['off', 'low', 'medium', 'high', 'max'] as const
 
@@ -42,6 +43,10 @@ export interface PermissionController {
   runPermissionCommand(sessionKey: string, preset?: string): Promise<string>
 }
 
+export interface SessionLifecycleController {
+  startNewSession(sessionKey: string): Promise<void>
+}
+
 /** Bridge-side QQ commands for model routing. These never enter the agent. */
 export class BridgeControlHandler implements Handler {
   name = 'bridge-control'
@@ -50,6 +55,7 @@ export class BridgeControlHandler implements Handler {
     private readonly controller: ModelSelectionController,
     private readonly directorySwitcher?: DirectorySwitcher,
     private readonly permissionController?: PermissionController,
+    private readonly sessionLifecycle?: SessionLifecycleController,
   ) {}
 
   test(payload: string): boolean {
@@ -57,6 +63,8 @@ export class BridgeControlHandler implements Handler {
       || payload.startsWith(`${DIR_COMMAND} `)
       || payload === MODELS_COMMAND
       || payload === HELP_COMMAND
+      || payload === NEW_SESSION_COMMAND
+      || payload.startsWith(`${NEW_SESSION_COMMAND} `)
       || payload === PERMISSIONS_COMMAND
       || payload === PERMISSION_COMMAND
       || payload.startsWith(`${PERMISSION_COMMAND} `)
@@ -74,6 +82,10 @@ export class BridgeControlHandler implements Handler {
     }
     if (ctx.payload === HELP_COMMAND) {
       await ctx.respond(formatHelp())
+      return
+    }
+    if (ctx.payload === NEW_SESSION_COMMAND || ctx.payload.startsWith(`${NEW_SESSION_COMMAND} `)) {
+      await this.runNewSession(ctx, sessionKey)
       return
     }
     if (ctx.payload === PERMISSIONS_COMMAND || ctx.payload === PERMISSION_COMMAND || ctx.payload.startsWith(`${PERMISSION_COMMAND} `)) {
@@ -103,6 +115,19 @@ export class BridgeControlHandler implements Handler {
       await ctx.respond(await this.permissionController.runPermissionCommand(sessionKey, preset))
     } catch (err) {
       await ctx.respond(`权限切换失败: ${errorMessage(err)}`)
+    }
+  }
+
+  private async runNewSession(ctx: HandlerContext, sessionKey: string): Promise<void> {
+    if (!this.sessionLifecycle) {
+      await ctx.respond('当前 host 不支持新开 Agent session。')
+      return
+    }
+    try {
+      await this.sessionLifecycle.startNewSession(sessionKey)
+      await ctx.respond('已为当前 QQ 聊天新开 Agent session。下一条消息会使用新的上下文。')
+    } catch (err) {
+      await ctx.respond(`新开 Agent session 失败: ${errorMessage(err)}`)
     }
   }
 
@@ -235,6 +260,7 @@ function formatHelp(): string {
     '/permission [preset] - 查看或切换当前 QQ 会话权限 preset',
     '/permissions - 查看当前权限 preset 和可用 preset',
     '/dir <目录> - 切换当前 QQ 会话工作目录',
+    '/new-session - 为当前 QQ 聊天新开 Agent session',
   ].join('\n')
 }
 

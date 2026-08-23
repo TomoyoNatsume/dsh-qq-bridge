@@ -99,6 +99,8 @@ export class AgentRpcHandler implements Handler {
       webActivityGate?: AgentRunGate
       /** Web session 忙时先回发给 QQ 的提示。 */
       webBusyMessage?: string
+      /** 当前桥侧 Agent session version；变化时 QQ style skill 会重新按首轮注入。 */
+      sessionVersion?: (sessionKey: string) => number
     } = {},
   ) {}
 
@@ -174,8 +176,10 @@ export class AgentRpcHandler implements Handler {
 
   private nextQqStyleSkillInjection(sessionKey: string): QqReplyStyleSkillInjection | undefined {
     if (!this.opts.qqReplyStyleSkill || this.opts.qqReplyStyleSkill.enabled === false) return undefined
-    const nextTurn = (this.qqStyleSkillTurnCounts.get(sessionKey) ?? 0) + 1
-    this.qqStyleSkillTurnCounts.set(sessionKey, nextTurn)
+    const version = this.opts.sessionVersion?.(sessionKey)
+    const countKey = version === undefined ? sessionKey : `${sessionKey}@${version}`
+    const nextTurn = (this.qqStyleSkillTurnCounts.get(countKey) ?? 0) + 1
+    this.qqStyleSkillTurnCounts.set(countKey, nextTurn)
     const repeat = nextTurn === 1 || nextTurn % QQ_REPLY_STYLE_SKILL_REPEAT_INTERVAL === 0
     return {
       invokeSkill: repeat,

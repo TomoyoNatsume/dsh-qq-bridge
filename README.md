@@ -71,7 +71,7 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 ## 功能
 
 - **QQ 遥控 Agent**：白名单用户可直接在 QQ 里发任务，插件会转成 DSH live session，并把最终回复发回 QQ。
-- **工作区、模型和权限控制**：支持 `/dir`、`/models`、`/model`、`/reasoningEff`、`/permission` 等 bridge 侧指令，也支持用自然语言完成常用切换。
+- **工作区、模型、权限和会话控制**：支持 `/dir`、`/new-session`、`/models`、`/model`、`/reasoningEff`、`/permission` 等 bridge 侧指令，也支持用自然语言完成常用切换。
 - **定时提醒和 memo**：支持一次性定时任务和备忘记录，数据通过 DSH `storageDomain` 持久化。
 - **Web 会话完成提醒**：非 QQ Web 会话结束后，可主动给管理员 QQ 发提醒；QQ 发起的会话只返回实际 Agent 回复。
 - **双接入路径**：默认推荐 NapCat / OneBot，本机个人使用更方便；也可切换腾讯官方 QQ Bot。
@@ -166,6 +166,7 @@ ping
 /model deepseek-v4-pro
 /reasoningEff high
 /permission workspace-write
+/new-session
 帮我把工作目录改到 /home/xxx/project
 请在 2026 年 9 月 1 号中午 12 点提醒我提交报告
 ```
@@ -461,12 +462,13 @@ echo: ping
 | `/permission` | `/permission` | 查看当前权限 preset 和可用 preset。 | 当前 QQ live session |
 | `/permissions` | `/permissions` | 同 `/permission`，用于查看权限 preset。 | 当前 QQ live session |
 | `/permission <preset>` | `/permission workspace-write` | 调用 DSH 原生 `/permission` command 切换当前 live session 权限。 | 当前 QQ live session |
+| `/new-session` | `/new-session` | 为当前聊天新开 Agent session；保留工作目录、模型、推理等级和 memo/timer。 | 当前 QQ 聊天 |
 
 ### 自然语言控制
 
 QQ 专用 Agent preset 还支持自然语言控制。Agent 会输出私有 `<dsh-qq-bridge-control>...</dsh-qq-bridge-control>`，插件拦截后执行，不会把控制块内容发回 QQ。
 
-自然语言控制可切换工作目录、模型、推理等级和权限，也可创建一次性定时任务或记录 memo。定时任务和 memo 会通过 DSH `storageDomain` 持久化；默认 Web JSON 后端会落到 `~/.dsh/storages/dsh_qq_bridge.json`。插件启动和每 2 小时扫描一次 pending timer，2 小时内到期的任务才会挂短计时器，到点后在同一个 QQ 会话触发 Agent 并主动发回 QQ。
+自然语言控制可切换工作目录、模型、推理等级和权限，也可新开 Agent session、创建一次性定时任务或记录 memo。定时任务和 memo 会通过 DSH `storageDomain` 持久化；默认 Web JSON 后端会落到 `~/.dsh/storages/dsh_qq_bridge.json`。memo 和 timer 按 QQ target（私聊用户或群）归属，同一个 target 下可跨 Agent session 访问，不跨不同 target。memo 会按稳定 item key 更新同一条记录，例如先记 `TCL电视价格为3200`、再改成 `TCL电视价格为4000` 会覆盖同一条。插件启动和每 2 小时扫描一次 pending timer，2 小时内到期的任务才会挂短计时器，到点后触发记录来源 Agent session 并主动发回原 QQ target，执行结束后删除该 timer。
 
 | 用户说法示例 | Agent 控制动作 | 作用 |
 | --- | --- | --- |
@@ -474,8 +476,9 @@ QQ 专用 Agent preset 还支持自然语言控制。Agent 会输出私有 `<dsh
 | `把模型改成 deepseek-v4-pro` | `set_model` | 与 `/model <模型名>` 一致，动态切换当前 QQ 会话模型。 |
 | `推理等级改成 high` | `set_reasoning_effort` | 与 `/reasoningEff <等级>` 一致，动态切换当前 QQ 会话推理等级。 |
 | `权限改成 workspace-write` | `set_permission` | 与 `/permission <preset>` 一致，切换当前 QQ live session 权限。 |
-| `请在 2026 年 9 月 1 号中午 12 点提醒我提交报告` | `schedule_task` | 创建一次性持久化 timer；插件启动和每 2 小时扫描 pending timer，2 小时内到期才挂短计时器。 |
-| `记一下：2026/07/08 日收入 350 元` | `save_memo` | 持久化记录一条 memo，默认存储在 `~/.dsh/storages/dsh_qq_bridge.json`。 |
+| `帮我新开一个会话` | `new_session` | 与 `/new-session` 一致，为当前聊天新开 Agent session。 |
+| `请在 2026 年 9 月 1 号中午 12 点提醒我提交报告` | `schedule_task` | 创建一次性持久化 timer；按 QQ target 归属，到点执行后删除。 |
+| `记一下：2026/07/08 日收入 350 元` | `save_memo` | 持久化记录一条 memo；按 QQ target 和 item key 归属，同 target 可跨 Agent session 访问，同 key 会更新同一条。 |
 
 ## 安全
 
@@ -487,7 +490,7 @@ QQ 专用 Agent preset 还支持自然语言控制。Agent 会输出私有 `<dsh
 
 ### 指令入口
 
-默认 `commandPrefix: ""`，白名单用户的普通消息会直接进入 DSH。设置为 `/dsh`、`/ai` 等非空值后，只有以该前缀开头的消息才会进入 DSH。`/dir <目录>`、`/models`、`/model <模型名>`、`/reasoningEff <等级>`、`/permission [preset]`、`/permissions`、`/help` 是内置 bridge 控制命令，默认空前缀时可直接发送。
+默认 `commandPrefix: ""`，白名单用户的普通消息会直接进入 DSH。设置为 `/dsh`、`/ai` 等非空值后，只有以该前缀开头的消息才会进入 DSH。`/dir <目录>`、`/new-session`、`/models`、`/model <模型名>`、`/reasoningEff <等级>`、`/permission [preset]`、`/permissions`、`/help` 是内置 bridge 控制命令，默认空前缀时可直接发送。
 
 ### OneBot 只监听本机
 

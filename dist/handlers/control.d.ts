@@ -1,6 +1,6 @@
 import { HandlerContext } from '../router.js';
 import { DirectorySwitcher } from './directory.js';
-import type { ModelSelectionController, PermissionController } from './model-control.js';
+import type { ModelSelectionController, PermissionController, SessionLifecycleController } from './model-control.js';
 export declare const QQ_CONTROL_BLOCK_TAG = "dsh-qq-bridge-control";
 export interface QqControlAction {
     action: string;
@@ -29,3 +29,4 @@ export declare function createSetCwdControlHandler(switcher: DirectorySwitcher):
 export declare function createSetModelControlHandler(controller: ModelSelectionController): QqControlActionHandler;
 export declare function createSetReasoningEffortControlHandler(controller: ModelSelectionController): QqControlActionHandler;
 export declare function createSetPermissionControlHandler(controller: PermissionController): QqControlActionHandler;
+export declare function createNewSessionControlHandler(controller: SessionLifecycleController): QqControlActionHandler;

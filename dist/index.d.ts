@@ -16,9 +16,9 @@ export { DshAgentExecutor, extractLastAssistantText, hashKey } from './handlers/
 export type { DshRenderedAgent } from './handlers/dsh-executor.js';
 export { DIR_COMMAND, DirectoryHandler, resolveUserPath } from './handlers/directory.js';
 export type { DirectorySwitcher } from './handlers/directory.js';
-export { BridgeControlHandler, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, ModelControlHandler, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, installBridgeModelSelection, resolveConfiguredModels, } from './handlers/model-control.js';
-export type { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, ModelSelectionController, PermissionController, } from './handlers/model-control.js';
-export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, parseQqControlBlocks, } from './handlers/control.js';
+export { BridgeControlHandler, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, ModelControlHandler, NEW_SESSION_COMMAND, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, installBridgeModelSelection, resolveConfiguredModels, } from './handlers/model-control.js';
+export type { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, ModelSelectionController, PermissionController, SessionLifecycleController, } from './handlers/model-control.js';
+export { QQ_CONTROL_BLOCK_TAG, QqControlDispatcher, createNewSessionControlHandler, createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, parseQqControlBlocks, } from './handlers/control.js';
 export type { ParsedQqControls, QqControlAction, QqControlActionHandler, QqControlContext, } from './handlers/control.js';
 export { InMemoryCustomMemoryStore, LazyCustomMemoryStore, StorageDomainCustomMemoryStore, createSaveMemoControlHandler, customMemoryDomainSpec, customMemoryMemoSchema, customMemoryTimerSchema, } from './handlers/custom-memory.js';
 export type { CustomMemoryMemoRecord, CustomMemoryRecordStatus, CustomMemoryStore, CustomMemoryTarget, CustomMemoryTimerRecord, DshKvTable, DshStorageDomain, DshStorageDomainRuntime, } from './handlers/custom-memory.js';

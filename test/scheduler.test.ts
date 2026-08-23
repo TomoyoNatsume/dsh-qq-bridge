@@ -8,7 +8,7 @@ describe('dsh-qq-bridge — scheduled tasks', () => {
     vi.useRealTimers()
   })
 
-  it('creates an in-memory timer and triggers the same QQ session agent at runAt', async () => {
+  it('creates an in-memory timer and triggers the source agent session at runAt', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-21T10:00:00+08:00'))
     const run = vi.fn(async () => '该提交报告了')
@@ -120,11 +120,15 @@ describe('dsh-qq-bridge — scheduled tasks', () => {
     expect(message).toContain('已创建定时任务')
     expect(scheduler.size).toBe(0)
     expect(domain.tableValues('timers')[0]).toMatchObject({
-      type: 'timer',
       time: '2026-08-21T13:00:00+08:00',
       content: '提醒我提交报告',
+      sourceSessionKey: 'private:10001',
+      scope: 'private',
+      targetId: 10001,
       status: 'pending',
     })
+    expect(domain.tableValues('timers')[0]).not.toHaveProperty('sessionKey')
+    expect(domain.tableValues('timers')[0]).not.toHaveProperty('type')
 
     vi.setSystemTime(new Date('2026-08-21T11:00:00+08:00'))
     await scheduler.scanDueTasks()
@@ -134,7 +138,7 @@ describe('dsh-qq-bridge — scheduled tasks', () => {
 
     expect(run).toHaveBeenCalledWith('private:10001', expect.stringContaining('提醒我提交报告'))
     expect(sent).toEqual(['该提交报告了'])
-    expect(domain.tableValues('timers')[0]).toMatchObject({ status: 'fired' })
+    expect(domain.tableValues('timers')).toEqual([])
     await store.close()
     scheduler.dispose()
   })
@@ -146,7 +150,7 @@ describe('dsh-qq-bridge — scheduled tasks', () => {
     dispatcher.register(createSaveMemoControlHandler(store))
 
     const message = await dispatcher.dispatch(
-      { action: 'save_memo', content: '2026/07/08 日收入 350 元' },
+      { action: 'save_memo', key: '2026/07/08 日收入', content: '2026/07/08 日收入 350 元' },
       {
         sessionKey: 'private:10001',
         source: {
@@ -160,12 +164,85 @@ describe('dsh-qq-bridge — scheduled tasks', () => {
 
     expect(message).toContain('已记录 memo')
     expect(domain.tableValues('memos')[0]).toMatchObject({
-      type: 'memo',
+      key: '2026/07/08 日收入',
       content: '2026/07/08 日收入 350 元',
-      sessionKey: 'private:10001',
+      sourceSessionKey: 'private:10001',
       scope: 'private',
       targetId: 10001,
     })
+    expect(domain.tableValues('memos')[0]).not.toHaveProperty('sessionKey')
+    expect(domain.tableValues('memos')[0]).not.toHaveProperty('type')
+    await store.close()
+  })
+
+  it('updates the same memo item by target and key', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-21T10:00:00+08:00'))
+    const domain = new FakeStorageDomain()
+    const store = new LazyCustomMemoryStore(() => domain)
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createSaveMemoControlHandler(store))
+    const ctx = {
+      sessionKey: 'private:10001',
+      source: {
+        userId: 10001,
+        scope: 'private' as const,
+        payload: '',
+        async respond() {},
+      },
+    }
+
+    await dispatcher.dispatch(
+      { action: 'save_memo', key: 'TCL电视价格', content: 'TCL电视价格为3200' },
+      ctx,
+    )
+    vi.setSystemTime(new Date('2026-08-21T10:05:00+08:00'))
+    await dispatcher.dispatch(
+      { action: 'save_memo', key: 'TCL电视价格', content: 'TCL电视价格为4000' },
+      ctx,
+    )
+
+    expect(domain.tableValues('memos')).toHaveLength(1)
+    expect(domain.tableValues('memos')[0]).toMatchObject({
+      key: 'TCL电视价格',
+      content: 'TCL电视价格为4000',
+      sourceSessionKey: 'private:10001',
+      scope: 'private',
+      targetId: 10001,
+      updatedAt: '2026-08-21T02:05:00.000Z',
+    })
+    await store.close()
+  })
+
+  it('normalizes legacy sessionKey records to sourceSessionKey', async () => {
+    const domain = new FakeStorageDomain()
+    const store = new LazyCustomMemoryStore(() => domain)
+    await domain.open({
+      tables: {
+        timers: {},
+        memos: {},
+      },
+    })
+    await domain.table('memos').put('legacy-memo', {
+      uuid: 'legacy-memo',
+      type: 'memo',
+      content: '旧 memo',
+      sessionKey: 'private:10001',
+      scope: 'private',
+      targetId: 10001,
+      createdAt: '2026-08-21T10:00:00.000Z',
+    })
+
+    expect(await store.listMemos()).toEqual([
+      expect.objectContaining({
+        uuid: 'legacy-memo',
+        key: '旧 memo',
+        content: '旧 memo',
+        sourceSessionKey: 'private:10001',
+        scope: 'private',
+        targetId: 10001,
+      }),
+    ])
     await store.close()
   })
 })
@@ -186,6 +263,12 @@ class FakeStorageDomain {
 
   tableValues(name: string): unknown[] {
     return [...(this.tables.get(name)?.entries() ?? [])].map(([, value]) => value)
+  }
+
+  table(name: string): FakeTable {
+    const table = this.tables.get(name) ?? new FakeTable()
+    this.tables.set(name, table)
+    return table
   }
 }
 

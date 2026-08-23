@@ -18,7 +18,7 @@ export interface ScheduledTaskTarget {
 
 export interface ScheduledTask {
   id: string
-  sessionKey: string
+  sourceSessionKey: string
   target: ScheduledTaskTarget
   runAt: Date
   runAtText: string
@@ -79,7 +79,7 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
 
     const record = createTimerRecord({
       source: input.source,
-      sessionKey: input.sessionKey,
+      sourceSessionKey: input.sessionKey,
       time: runAtText,
       content: message,
       now: this.opts.now,
@@ -100,7 +100,10 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
   async scanDueTasks(): Promise<void> {
     const timers = await this.store().listTimers()
     for (const timer of timers) {
-      if (timer.status !== 'pending') continue
+      if (timer.status !== 'pending') {
+        await this.store().deleteTimer(timer.uuid)
+        continue
+      }
       this.armIfWithinWindow(timer)
     }
   }
@@ -146,15 +149,15 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
     entry.disposed = true
     this.tasks.delete(entry.task.id)
     try {
-      const result = await this.opts.executor.run(entry.task.sessionKey, formatScheduledTaskPrompt(entry.task))
+      const result = await this.opts.executor.run(entry.task.sourceSessionKey, formatScheduledTaskPrompt(entry.task))
       await this.sendAgentResult(entry.task.target, result || '(no output)')
-      await this.markTask(entry.task.id, 'fired')
     } catch (err) {
-      await this.markTask(entry.task.id, 'failed', err instanceof Error ? err.message : String(err))
       await this.sendChunks(
         entry.task.target,
         `定时任务执行失败: ${err instanceof Error ? err.message : String(err)}`,
       )
+    } finally {
+      await this.store().deleteTimer(entry.task.id)
     }
   }
 
@@ -186,18 +189,6 @@ export class InMemoryTaskScheduler implements ScheduledTaskController {
     return this.opts.store ?? fallbackStore
   }
 
-  private async markTask(id: string, status: 'fired' | 'failed', error?: string): Promise<void> {
-    const store = this.store()
-    const current = (await store.listTimers()).find(timer => timer.uuid === id)
-    if (!current) return
-    await store.updateTimer({
-      ...current,
-      status,
-      updatedAt: new Date(this.now()).toISOString(),
-      ...(status === 'fired' ? { firedAt: new Date(this.now()).toISOString() } : {}),
-      ...(error ? { error } : {}),
-    })
-  }
 }
 
 export function createScheduleTaskControlHandler(controller: ScheduledTaskController): QqControlActionHandler {
@@ -241,7 +232,7 @@ function formatScheduledTaskPrompt(task: ScheduledTask): string {
 function taskFromRecord(record: CustomMemoryTimerRecord, runAt: Date): ScheduledTask {
   return {
     id: record.uuid,
-    sessionKey: record.sessionKey,
+    sourceSessionKey: record.sourceSessionKey,
     target: { scope: record.scope, targetId: record.targetId },
     runAt,
     runAtText: record.time,
@@ -253,6 +244,7 @@ const fallbackStore: CustomMemoryStore = {
   async saveTimer() {},
   async listTimers() { return [] },
   async updateTimer() {},
+  async deleteTimer() { return false },
   async saveMemo() {},
   async listMemos() { return [] },
 }

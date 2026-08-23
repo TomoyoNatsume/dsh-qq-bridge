@@ -6,6 +6,7 @@ export declare const HELP_COMMAND = "/help";
 export declare const REASONING_EFFORT_COMMAND = "/reasoningEff";
 export declare const PERMISSION_COMMAND = "/permission";
 export declare const PERMISSIONS_COMMAND = "/permissions";
+export declare const NEW_SESSION_COMMAND = "/new-session";
 export interface BridgeModelSelection {
     provider: string;
     model: string;
@@ -31,16 +32,21 @@ export interface ModelSelectionController {
 export interface PermissionController {
     runPermissionCommand(sessionKey: string, preset?: string): Promise<string>;
 }
+export interface SessionLifecycleController {
+    startNewSession(sessionKey: string): Promise<void>;
+}
 /** Bridge-side QQ commands for model routing. These never enter the agent. */
 export declare class BridgeControlHandler implements Handler {
     private readonly controller;
     private readonly directorySwitcher?;
     private readonly permissionController?;
+    private readonly sessionLifecycle?;
     name: string;
-    constructor(controller: ModelSelectionController, directorySwitcher?: DirectorySwitcher | undefined, permissionController?: PermissionController | undefined);
+    constructor(controller: ModelSelectionController, directorySwitcher?: DirectorySwitcher | undefined, permissionController?: PermissionController | undefined, sessionLifecycle?: SessionLifecycleController | undefined);
     test(payload: string): boolean;
     run(ctx: HandlerContext): Promise<void>;
     private runPermission;
+    private runNewSession;
     private runDir;
     private runModel;
     private runReasoningEffort;

@@ -4,6 +4,7 @@ import { AccessGate } from '../src/security.js'
 import { AgentRpcHandler, formatQqReplyStyleSkillPrompt, splitText } from '../src/handlers/agent.js'
 import {
   createSetCwdControlHandler,
+  createNewSessionControlHandler,
   createSetModelControlHandler,
   createSetPermissionControlHandler,
   createSetReasoningEffortControlHandler,
@@ -104,6 +105,28 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
 
     await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh style 请用别的风格' }))
     expect(executor.run.mock.calls.at(-1)?.[1]).toContain('User QQ Message:\nstyle 请用别的风格')
+  })
+
+  it('QQ style skill 在 session version 变化后重新按首轮调用', async () => {
+    let version = 0
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '/dsh', mode: 'whitelist' })
+    const executor = { run: vi.fn(async () => 'ok') }
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler(executor, {
+      ackMessage: '',
+      qqReplyStyleSkill: { enabled: true },
+      sessionVersion: () => version,
+    }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh first' }))
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh second' }))
+    version += 1
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/dsh third' }))
+
+    expect(executor.run.mock.calls[0]?.[1]).toContain('/qq-session-reply-style')
+    expect(executor.run.mock.calls[1]?.[1]).not.toContain('/qq-session-reply-style')
+    expect(executor.run.mock.calls[2]?.[1]).toContain('/qq-session-reply-style')
   })
 
   it('回发失败只记录警告,不让 route 抛错拖垮 host', async () => {
@@ -291,6 +314,32 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
     expect(sent.join('\n')).toContain('/permission [preset]')
   })
 
+  it('/new-session 新开当前聊天 Agent session 且不会进入 agent handler', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const run = vi.fn(async () => 'agent should not run')
+    const startNewSession = vi.fn(async () => {})
+    const sent: string[] = []
+    const controller = {
+      getModelSelection: vi.fn(() => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })),
+      listModels: vi.fn(async () => []),
+      selectModel: vi.fn(async (_sessionKey: string, model: string) => ({ provider: 'deepseek-official', model })),
+      selectReasoningEffort: vi.fn(async (_sessionKey: string, reasoningEffort: string) => ({
+        provider: 'deepseek-official',
+        model: 'deepseek-v4-flash',
+        reasoningEffort,
+      })),
+    }
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new BridgeControlHandler(controller, undefined, undefined, { startNewSession }))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '' }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '/new-session' }))
+
+    expect(startNewSession).toHaveBeenCalledWith('private:10001')
+    expect(run).not.toHaveBeenCalled()
+    expect(sent).toEqual(['已为当前 QQ 聊天新开 Agent session。下一条消息会使用新的上下文。'])
+  })
+
   it('agent 输出 set_cwd 控制块时执行切目录且不回发原始控制块', async () => {
     const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
     const setCwd = vi.fn(async () => {})
@@ -372,6 +421,25 @@ describe('dsh-qq-bridge — MessageRouter + AccessGate', () => {
 
     expect(permission.runPermissionCommand).toHaveBeenCalledWith('private:10001', 'workspace-write')
     expect(sent).toEqual(['权限命令执行成功: preset workspace-write'])
+    expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
+  })
+
+  it('agent 输出 new_session 控制块时新开 session 且不回发原始控制块', async () => {
+    const gate = new AccessGate({ adminQq: 10001, allowlist: [], commandPrefix: '', mode: 'whitelist' })
+    const startNewSession = vi.fn(async () => {})
+    const dispatcher = new QqControlDispatcher()
+    dispatcher.register(createNewSessionControlHandler({ startNewSession }))
+    const run = vi.fn(async () => (
+      '<dsh-qq-bridge-control>{"action":"new_session"}</dsh-qq-bridge-control>'
+    ))
+    const sent: string[] = []
+    const router = new MessageRouter(gate, async (_, __, text) => void sent.push(text))
+    router.register(new AgentRpcHandler({ run } as never, { ackMessage: '', controlDispatcher: dispatcher }))
+
+    await router.route(makeEvent({ user_id: 10001, raw_message: '帮我开一个新会话' }))
+
+    expect(startNewSession).toHaveBeenCalledWith('private:10001')
+    expect(sent).toEqual(['已为当前 QQ 聊天新开 Agent session。下一条消息会使用新的上下文。'])
     expect(sent.join('\n')).not.toContain('dsh-qq-bridge-control')
   })
 

@@ -5,10 +5,10 @@ import { AccessGate } from './security.js';
 import { AgentRpcHandler } from './handlers/agent.js';
 import { DshAgentExecutor } from './handlers/dsh-executor.js';
 import { DIR_COMMAND, resolveUserPath } from './handlers/directory.js';
-import { createSetCwdControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, QqControlDispatcher, } from './handlers/control.js';
+import { createSetCwdControlHandler, createNewSessionControlHandler, createSetModelControlHandler, createSetPermissionControlHandler, createSetReasoningEffortControlHandler, QqControlDispatcher, } from './handlers/control.js';
 import { createSaveMemoControlHandler, LazyCustomMemoryStore } from './handlers/custom-memory.js';
 import { createScheduleTaskControlHandler, InMemoryTaskScheduler } from './handlers/scheduler.js';
-import { BridgeControlHandler, installBridgeModelSelection, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, } from './handlers/model-control.js';
+import { BridgeControlHandler, installBridgeModelSelection, HELP_COMMAND, MODEL_COMMAND, MODELS_COMMAND, NEW_SESSION_COMMAND, PERMISSION_COMMAND, PERMISSIONS_COMMAND, REASONING_EFFORT_COMMAND, } from './handlers/model-control.js';
 import { ShellHandler } from './handlers/shell.js';
 import { DshQqBridgeConfig } from './config.js';
 import { NapcatSelfLogInput } from './inputs/napcat-log.js';
@@ -134,12 +134,13 @@ async function startQqBridge(ctx, cfg) {
     taskScheduler.startScanning();
     const controlDispatcher = new QqControlDispatcher();
     controlDispatcher.register(createSetCwdControlHandler(executor));
+    controlDispatcher.register(createNewSessionControlHandler(executor));
     controlDispatcher.register(createSetModelControlHandler(executor));
     controlDispatcher.register(createSetReasoningEffortControlHandler(executor));
     controlDispatcher.register(createSetPermissionControlHandler(executor));
     controlDispatcher.register(createSaveMemoControlHandler(customMemoryStore));
     controlDispatcher.register(createScheduleTaskControlHandler(taskScheduler));
-    const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor));
+    const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor, executor));
     let unregisterShell = () => { };
     if (cfg.shell.enabled) {
         unregisterShell = router.register(new ShellHandler(async (cmd) => ({ stdout: `(shell exec disabled) ${cmd}`, code: 1 })));
@@ -153,9 +154,11 @@ async function startQqBridge(ctx, cfg) {
         timeoutMessage: cfg.agent.timeoutMessage,
         qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
         webActivityGate: webActivity.gate,
+        sessionVersion: (sessionKey) => executor.getSessionVersion(sessionKey),
         reservedCommands: [
             DIR_COMMAND,
             HELP_COMMAND,
+            NEW_SESSION_COMMAND,
             MODELS_COMMAND,
             MODEL_COMMAND,
             REASONING_EFFORT_COMMAND,

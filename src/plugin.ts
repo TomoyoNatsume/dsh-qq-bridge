@@ -7,6 +7,7 @@ import { DshAgentExecutor, DshRenderedAgent } from './handlers/dsh-executor.js'
 import { DIR_COMMAND, resolveUserPath } from './handlers/directory.js'
 import {
   createSetCwdControlHandler,
+  createNewSessionControlHandler,
   createSetModelControlHandler,
   createSetPermissionControlHandler,
   createSetReasoningEffortControlHandler,
@@ -24,6 +25,7 @@ import {
   HELP_COMMAND,
   MODEL_COMMAND,
   MODELS_COMMAND,
+  NEW_SESSION_COMMAND,
   PERMISSION_COMMAND,
   PERMISSIONS_COMMAND,
   REASONING_EFFORT_COMMAND,
@@ -256,12 +258,13 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
   taskScheduler.startScanning()
   const controlDispatcher = new QqControlDispatcher()
   controlDispatcher.register(createSetCwdControlHandler(executor))
+  controlDispatcher.register(createNewSessionControlHandler(executor))
   controlDispatcher.register(createSetModelControlHandler(executor))
   controlDispatcher.register(createSetReasoningEffortControlHandler(executor))
   controlDispatcher.register(createSetPermissionControlHandler(executor))
   controlDispatcher.register(createSaveMemoControlHandler(customMemoryStore))
   controlDispatcher.register(createScheduleTaskControlHandler(taskScheduler))
-  const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor))
+  const unregisterBridgeControl = router.register(new BridgeControlHandler(executor, executor, executor, executor))
 
   let unregisterShell: () => void = () => {}
   if (cfg.shell.enabled) {
@@ -279,9 +282,11 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
     timeoutMessage: cfg.agent.timeoutMessage,
     qqReplyStyleSkill: cfg.agent.qqReplyStyleSkill,
     webActivityGate: webActivity.gate,
+    sessionVersion: (sessionKey) => executor.getSessionVersion(sessionKey),
     reservedCommands: [
       DIR_COMMAND,
       HELP_COMMAND,
+      NEW_SESSION_COMMAND,
       MODELS_COMMAND,
       MODEL_COMMAND,
       REASONING_EFFORT_COMMAND,

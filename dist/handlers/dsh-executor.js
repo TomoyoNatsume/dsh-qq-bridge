@@ -123,6 +123,13 @@ export class DshAgentExecutor {
         this.sessions.delete(sessionKey);
         this.queues.delete(sessionKey);
     }
+    async startNewSession(sessionKey) {
+        this.sessionVersions.set(sessionKey, this.getSessionVersion(sessionKey) + 1);
+        await this.disposeSession(sessionKey);
+    }
+    getSessionVersion(sessionKey) {
+        return this.sessionVersions.get(sessionKey) ?? 0;
+    }
     getModelSelection(sessionKey) {
         return this.selectionRef(sessionKey).current;
     }
@@ -158,8 +165,7 @@ export class DshAgentExecutor {
     /** 切换某个 QQ 来源的工作目录;下一轮会创建新的 DSH session。 */
     async setCwd(sessionKey, cwd) {
         this.sessionCwds.set(sessionKey, cwd);
-        this.sessionVersions.set(sessionKey, (this.sessionVersions.get(sessionKey) ?? 0) + 1);
-        await this.disposeSession(sessionKey);
+        await this.startNewSession(sessionKey);
     }
     /** 当前 QQ 来源的工作目录;未切换时返回配置默认目录或 host cwd。 */
     getCwd(sessionKey) {

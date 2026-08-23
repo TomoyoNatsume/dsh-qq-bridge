@@ -1,5 +1,5 @@
 import { AgentExecutor } from './agent.js';
-import { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, PermissionController } from './model-control.js';
+import { BridgeModelInfo, BridgeModelSelection, BridgeModelSelectionRef, PermissionController, SessionLifecycleController } from './model-control.js';
 /**
  * 提取 session surface 中最后一条 assistant 消息的纯文本。
  *
@@ -63,7 +63,7 @@ export interface DshServiceHandles {
  * - disposeAll() 在插件 teardown 时释放全部 live agent。
  * - disposeSession() 可主动丢弃某个会话(如错误恢复、会话上限)。
  */
-export declare class DshAgentExecutor implements AgentExecutor, PermissionController {
+export declare class DshAgentExecutor implements AgentExecutor, PermissionController, SessionLifecycleController {
     private readonly dsh;
     private readonly opts;
     private agents;
@@ -95,6 +95,8 @@ export declare class DshAgentExecutor implements AgentExecutor, PermissionContro
     private readEvents;
     /** 主动丢弃某个会话的 live agent。 */
     disposeSession(sessionKey: string): Promise<void>;
+    startNewSession(sessionKey: string): Promise<void>;
+    getSessionVersion(sessionKey: string): number;
     getModelSelection(sessionKey: string): BridgeModelSelection;
     selectModel(sessionKey: string, model: string): Promise<BridgeModelSelection>;
     selectReasoningEffort(sessionKey: string, effort: string): Promise<BridgeModelSelection>;

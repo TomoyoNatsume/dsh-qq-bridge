@@ -9,7 +9,7 @@ export interface ScheduledTaskTarget {
 }
 export interface ScheduledTask {
     id: string;
-    sessionKey: string;
+    sourceSessionKey: string;
     target: ScheduledTaskTarget;
     runAt: Date;
     runAtText: string;
@@ -59,6 +59,5 @@ export declare class InMemoryTaskScheduler implements ScheduledTaskController {
     private now;
     private scanWindowMs;
     private store;
-    private markTask;
 }
 export declare function createScheduleTaskControlHandler(controller: ScheduledTaskController): QqControlActionHandler;

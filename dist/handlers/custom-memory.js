@@ -3,10 +3,11 @@ import { z } from 'zod';
 const targetIdSchema = z.union([z.string(), z.number()]);
 export const customMemoryTimerSchema = z.object({
     uuid: z.string().min(1),
-    type: z.literal('timer'),
+    type: z.literal('timer').optional(),
     time: z.string().min(1),
     content: z.string().min(1),
-    sessionKey: z.string().min(1),
+    sourceSessionKey: z.string().min(1).optional(),
+    sessionKey: z.string().min(1).optional(),
     scope: z.union([z.literal('private'), z.literal('group')]),
     targetId: targetIdSchema,
     status: z.union([z.literal('pending'), z.literal('fired'), z.literal('failed')]),
@@ -14,16 +15,44 @@ export const customMemoryTimerSchema = z.object({
     updatedAt: z.string().min(1).optional(),
     firedAt: z.string().min(1).optional(),
     error: z.string().min(1).optional(),
-});
+}).refine(record => record.sourceSessionKey || record.sessionKey, {
+    message: 'Timer record requires sourceSessionKey.',
+}).transform(record => ({
+    uuid: record.uuid,
+    time: record.time,
+    content: record.content,
+    sourceSessionKey: record.sourceSessionKey ?? record.sessionKey ?? '',
+    scope: record.scope,
+    targetId: record.targetId,
+    status: record.status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    firedAt: record.firedAt,
+    error: record.error,
+}));
 export const customMemoryMemoSchema = z.object({
     uuid: z.string().min(1),
-    type: z.literal('memo'),
+    type: z.literal('memo').optional(),
+    key: z.string().min(1).optional(),
     content: z.string().min(1),
-    sessionKey: z.string().min(1),
+    sourceSessionKey: z.string().min(1).optional(),
+    sessionKey: z.string().min(1).optional(),
     scope: z.union([z.literal('private'), z.literal('group')]),
     targetId: targetIdSchema,
     createdAt: z.string().min(1),
-});
+    updatedAt: z.string().min(1).optional(),
+}).refine(record => record.sourceSessionKey || record.sessionKey, {
+    message: 'Memo record requires sourceSessionKey.',
+}).transform(record => ({
+    uuid: record.uuid,
+    key: record.key ?? record.content,
+    content: record.content,
+    sourceSessionKey: record.sourceSessionKey ?? record.sessionKey ?? '',
+    scope: record.scope,
+    targetId: record.targetId,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+}));
 export const customMemoryDomainSpec = {
     name: 'dsh_qq_bridge',
     version: 0,
@@ -43,6 +72,9 @@ export class InMemoryCustomMemoryStore {
     }
     async updateTimer(record) {
         this.timers.set(record.uuid, freezeTimer(record));
+    }
+    async deleteTimer(uuid) {
+        return this.timers.delete(uuid);
     }
     async saveMemo(record) {
         this.memos.set(record.uuid, freezeMemo(record));
@@ -73,6 +105,9 @@ export class StorageDomainCustomMemoryStore {
     async updateTimer(record) {
         await this.timers.put(record.uuid, freezeTimer(record));
     }
+    async deleteTimer(uuid) {
+        return await this.timers.delete(uuid);
+    }
     async saveMemo(record) {
         await this.memos.put(record.uuid, freezeMemo(record));
     }
@@ -100,6 +135,9 @@ export class LazyCustomMemoryStore {
     }
     async updateTimer(record) {
         await (await this.active()).updateTimer(record);
+    }
+    async deleteTimer(uuid) {
+        return await (await this.active()).deleteTimer(uuid);
     }
     async saveMemo(record) {
         await (await this.active()).saveMemo(record);
@@ -140,16 +178,22 @@ export function createSaveMemoControlHandler(store) {
     return {
         action: 'save_memo',
         async run(action, ctx) {
+            if (typeof action.key !== 'string' || action.key.trim() === '') {
+                return 'QQ 控制块 save_memo 缺少 key。';
+            }
             if (typeof action.content !== 'string' || action.content.trim() === '') {
                 return 'QQ 控制块 save_memo 缺少 content。';
             }
-            const record = createMemoRecord({
+            const key = action.key.trim();
+            const content = action.content.trim();
+            const record = await upsertMemoRecord(store, createMemoRecord({
                 source: ctx.source,
-                sessionKey: ctx.sessionKey,
-                content: action.content.trim(),
-            });
+                sourceSessionKey: ctx.sessionKey,
+                key,
+                content,
+            }));
             await store.saveMemo(record);
-            return `已记录 memo: ${record.content}`;
+            return `已记录 memo: ${record.key}: ${record.content}`;
         },
     };
 }
@@ -158,10 +202,9 @@ export function createTimerRecord(input) {
     const target = targetFromSource(input.source);
     return {
         uuid: randomUUID(),
-        type: 'timer',
         time: input.time,
         content: input.content,
-        sessionKey: input.sessionKey,
+        sourceSessionKey: input.sourceSessionKey,
         scope: target.scope,
         targetId: target.targetId,
         status: 'pending',
@@ -173,9 +216,9 @@ export function createMemoRecord(input) {
     const target = targetFromSource(input.source);
     return {
         uuid: randomUUID(),
-        type: 'memo',
+        key: input.key,
         content: input.content,
-        sessionKey: input.sessionKey,
+        sourceSessionKey: input.sourceSessionKey,
         scope: target.scope,
         targetId: target.targetId,
         createdAt,
@@ -193,6 +236,19 @@ async function migrateStore(source, target) {
         await target.saveTimer(timer);
     for (const memo of await source.listMemos())
         await target.saveMemo(memo);
+}
+async function upsertMemoRecord(store, next) {
+    const existing = (await store.listMemos()).find(memo => memo.scope === next.scope
+        && memo.targetId === next.targetId
+        && memo.key === next.key);
+    if (!existing)
+        return next;
+    return {
+        ...existing,
+        content: next.content,
+        sourceSessionKey: next.sourceSessionKey,
+        updatedAt: next.createdAt,
+    };
 }
 function freezeTimer(record) {
     return { ...record };

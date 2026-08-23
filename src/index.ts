@@ -22,6 +22,7 @@ export {
   MODEL_COMMAND,
   MODELS_COMMAND,
   ModelControlHandler,
+  NEW_SESSION_COMMAND,
   PERMISSION_COMMAND,
   PERMISSIONS_COMMAND,
   REASONING_EFFORT_COMMAND,
@@ -34,10 +35,12 @@ export type {
   BridgeModelSelectionRef,
   ModelSelectionController,
   PermissionController,
+  SessionLifecycleController,
 } from './handlers/model-control.js'
 export {
   QQ_CONTROL_BLOCK_TAG,
   QqControlDispatcher,
+  createNewSessionControlHandler,
   createSetCwdControlHandler,
   createSetModelControlHandler,
   createSetPermissionControlHandler,

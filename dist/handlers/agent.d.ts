@@ -61,6 +61,8 @@ export declare class AgentRpcHandler implements Handler {
         webActivityGate?: AgentRunGate;
         /** Web session 忙时先回发给 QQ 的提示。 */
         webBusyMessage?: string;
+        /** 当前桥侧 Agent session version；变化时 QQ style skill 会重新按首轮注入。 */
+        sessionVersion?: (sessionKey: string) => number;
     });
     test(payload: string): boolean;
     /** 把一段文本按 maxLen 切分后逐条回发。 */

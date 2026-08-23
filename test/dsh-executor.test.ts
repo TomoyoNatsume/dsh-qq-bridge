@@ -126,6 +126,23 @@ describe('dsh-qq-bridge — DshAgentExecutor(多轮上下文)', () => {
     expect(state.drops).toContain(state.createSessionIds[0])
   })
 
+  it('startNewSession 释放当前会话,保留 cwd,并让下一轮创建新 session', async () => {
+    const { dsh, state } = makeMock({})
+    const exec = new DshAgentExecutor(dsh as never, { defaultCwd: '/default' })
+
+    await exec.setCwd('private:10001', '/project')
+    await exec.run('private:10001', 'before')
+    const previousVersion = exec.getSessionVersion('private:10001')
+    await exec.startNewSession('private:10001')
+    await exec.run('private:10001', 'after')
+
+    expect(exec.getSessionVersion('private:10001')).toBe(previousVersion + 1)
+    expect(state.createCalls).toEqual(['private:10001', 'private:10001'])
+    expect(state.createCwds).toEqual(['/project', '/project'])
+    expect(state.createSessionIds[0]).not.toBe(state.createSessionIds[1])
+    expect(state.drops).toContain(state.createSessionIds[0])
+  })
+
   it('getCwd 返回当前 session cwd,未切换时使用默认目录', async () => {
     const { dsh } = makeMock({})
     const exec = new DshAgentExecutor(dsh as never, { defaultCwd: '/default' })

@@ -9,10 +9,9 @@ export interface CustomMemoryTarget {
 }
 export interface CustomMemoryTimerRecord {
     uuid: string;
-    type: 'timer';
     time: string;
     content: string;
-    sessionKey: string;
+    sourceSessionKey: string;
     scope: 'private' | 'group';
     targetId: MessageTargetId;
     status: CustomMemoryRecordStatus;
@@ -23,17 +22,19 @@ export interface CustomMemoryTimerRecord {
 }
 export interface CustomMemoryMemoRecord {
     uuid: string;
-    type: 'memo';
+    key: string;
     content: string;
-    sessionKey: string;
+    sourceSessionKey: string;
     scope: 'private' | 'group';
     targetId: MessageTargetId;
     createdAt: string;
+    updatedAt?: string;
 }
 export interface CustomMemoryStore {
     saveTimer(record: CustomMemoryTimerRecord): Promise<void>;
     listTimers(): Promise<CustomMemoryTimerRecord[]>;
     updateTimer(record: CustomMemoryTimerRecord): Promise<void>;
+    deleteTimer(uuid: string): Promise<boolean>;
     saveMemo(record: CustomMemoryMemoRecord): Promise<void>;
     listMemos(): Promise<CustomMemoryMemoRecord[]>;
     close?(): Promise<void>;
@@ -52,143 +53,17 @@ export interface DshKvTable<V> {
     delete(key: string): Promise<boolean>;
     update(key: string, fn: (current: V) => V): Promise<V>;
 }
-export declare const customMemoryTimerSchema: z.ZodObject<{
-    uuid: z.ZodString;
-    type: z.ZodLiteral<"timer">;
-    time: z.ZodString;
-    content: z.ZodString;
-    sessionKey: z.ZodString;
-    scope: z.ZodUnion<[z.ZodLiteral<"private">, z.ZodLiteral<"group">]>;
-    targetId: z.ZodUnion<[z.ZodString, z.ZodNumber]>;
-    status: z.ZodUnion<[z.ZodLiteral<"pending">, z.ZodLiteral<"fired">, z.ZodLiteral<"failed">]>;
-    createdAt: z.ZodString;
-    updatedAt: z.ZodOptional<z.ZodString>;
-    firedAt: z.ZodOptional<z.ZodString>;
-    error: z.ZodOptional<z.ZodString>;
-}, "strip", z.ZodTypeAny, {
-    scope: "private" | "group";
-    type: "timer";
-    status: "failed" | "pending" | "fired";
-    targetId: string | number;
-    uuid: string;
-    time: string;
-    content: string;
-    sessionKey: string;
-    createdAt: string;
-    error?: string | undefined;
-    updatedAt?: string | undefined;
-    firedAt?: string | undefined;
-}, {
-    scope: "private" | "group";
-    type: "timer";
-    status: "failed" | "pending" | "fired";
-    targetId: string | number;
-    uuid: string;
-    time: string;
-    content: string;
-    sessionKey: string;
-    createdAt: string;
-    error?: string | undefined;
-    updatedAt?: string | undefined;
-    firedAt?: string | undefined;
-}>;
-export declare const customMemoryMemoSchema: z.ZodObject<{
-    uuid: z.ZodString;
-    type: z.ZodLiteral<"memo">;
-    content: z.ZodString;
-    sessionKey: z.ZodString;
-    scope: z.ZodUnion<[z.ZodLiteral<"private">, z.ZodLiteral<"group">]>;
-    targetId: z.ZodUnion<[z.ZodString, z.ZodNumber]>;
-    createdAt: z.ZodString;
-}, "strip", z.ZodTypeAny, {
-    scope: "private" | "group";
-    type: "memo";
-    targetId: string | number;
-    uuid: string;
-    content: string;
-    sessionKey: string;
-    createdAt: string;
-}, {
-    scope: "private" | "group";
-    type: "memo";
-    targetId: string | number;
-    uuid: string;
-    content: string;
-    sessionKey: string;
-    createdAt: string;
-}>;
+export declare const customMemoryTimerSchema: z.ZodType<CustomMemoryTimerRecord, z.ZodTypeDef, unknown>;
+export declare const customMemoryMemoSchema: z.ZodType<CustomMemoryMemoRecord, z.ZodTypeDef, unknown>;
 export declare const customMemoryDomainSpec: {
     name: string;
     version: number;
     tables: {
         timers: {
-            valueSchema: z.ZodObject<{
-                uuid: z.ZodString;
-                type: z.ZodLiteral<"timer">;
-                time: z.ZodString;
-                content: z.ZodString;
-                sessionKey: z.ZodString;
-                scope: z.ZodUnion<[z.ZodLiteral<"private">, z.ZodLiteral<"group">]>;
-                targetId: z.ZodUnion<[z.ZodString, z.ZodNumber]>;
-                status: z.ZodUnion<[z.ZodLiteral<"pending">, z.ZodLiteral<"fired">, z.ZodLiteral<"failed">]>;
-                createdAt: z.ZodString;
-                updatedAt: z.ZodOptional<z.ZodString>;
-                firedAt: z.ZodOptional<z.ZodString>;
-                error: z.ZodOptional<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                scope: "private" | "group";
-                type: "timer";
-                status: "failed" | "pending" | "fired";
-                targetId: string | number;
-                uuid: string;
-                time: string;
-                content: string;
-                sessionKey: string;
-                createdAt: string;
-                error?: string | undefined;
-                updatedAt?: string | undefined;
-                firedAt?: string | undefined;
-            }, {
-                scope: "private" | "group";
-                type: "timer";
-                status: "failed" | "pending" | "fired";
-                targetId: string | number;
-                uuid: string;
-                time: string;
-                content: string;
-                sessionKey: string;
-                createdAt: string;
-                error?: string | undefined;
-                updatedAt?: string | undefined;
-                firedAt?: string | undefined;
-            }>;
+            valueSchema: z.ZodType<CustomMemoryTimerRecord, z.ZodTypeDef, unknown>;
         };
         memos: {
-            valueSchema: z.ZodObject<{
-                uuid: z.ZodString;
-                type: z.ZodLiteral<"memo">;
-                content: z.ZodString;
-                sessionKey: z.ZodString;
-                scope: z.ZodUnion<[z.ZodLiteral<"private">, z.ZodLiteral<"group">]>;
-                targetId: z.ZodUnion<[z.ZodString, z.ZodNumber]>;
-                createdAt: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                scope: "private" | "group";
-                type: "memo";
-                targetId: string | number;
-                uuid: string;
-                content: string;
-                sessionKey: string;
-                createdAt: string;
-            }, {
-                scope: "private" | "group";
-                type: "memo";
-                targetId: string | number;
-                uuid: string;
-                content: string;
-                sessionKey: string;
-                createdAt: string;
-            }>;
+            valueSchema: z.ZodType<CustomMemoryMemoRecord, z.ZodTypeDef, unknown>;
         };
     };
 };
@@ -198,6 +73,7 @@ export declare class InMemoryCustomMemoryStore implements CustomMemoryStore {
     saveTimer(record: CustomMemoryTimerRecord): Promise<void>;
     listTimers(): Promise<CustomMemoryTimerRecord[]>;
     updateTimer(record: CustomMemoryTimerRecord): Promise<void>;
+    deleteTimer(uuid: string): Promise<boolean>;
     saveMemo(record: CustomMemoryMemoRecord): Promise<void>;
     listMemos(): Promise<CustomMemoryMemoRecord[]>;
 }
@@ -210,6 +86,7 @@ export declare class StorageDomainCustomMemoryStore implements CustomMemoryStore
     saveTimer(record: CustomMemoryTimerRecord): Promise<void>;
     listTimers(): Promise<CustomMemoryTimerRecord[]>;
     updateTimer(record: CustomMemoryTimerRecord): Promise<void>;
+    deleteTimer(uuid: string): Promise<boolean>;
     saveMemo(record: CustomMemoryMemoRecord): Promise<void>;
     listMemos(): Promise<CustomMemoryMemoRecord[]>;
     close(): Promise<void>;
@@ -224,6 +101,7 @@ export declare class LazyCustomMemoryStore implements CustomMemoryStore {
     saveTimer(record: CustomMemoryTimerRecord): Promise<void>;
     listTimers(): Promise<CustomMemoryTimerRecord[]>;
     updateTimer(record: CustomMemoryTimerRecord): Promise<void>;
+    deleteTimer(uuid: string): Promise<boolean>;
     saveMemo(record: CustomMemoryMemoRecord): Promise<void>;
     listMemos(): Promise<CustomMemoryMemoRecord[]>;
     close(): Promise<void>;
@@ -233,14 +111,15 @@ export declare class LazyCustomMemoryStore implements CustomMemoryStore {
 export declare function createSaveMemoControlHandler(store: CustomMemoryStore): QqControlActionHandler;
 export declare function createTimerRecord(input: {
     source: HandlerContext;
-    sessionKey: string;
+    sourceSessionKey: string;
     time: string;
     content: string;
     now?: () => number;
 }): CustomMemoryTimerRecord;
 export declare function createMemoRecord(input: {
     source: HandlerContext;
-    sessionKey: string;
+    sourceSessionKey: string;
+    key: string;
     content: string;
     now?: () => number;
 }): CustomMemoryMemoRecord;
