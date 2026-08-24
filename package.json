@@ -31,7 +31,8 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.js",
+    "build:client": "node scripts/build-client.js",
     "postbuild": "node scripts/postbuild.js",
     "start": "node dist/main.js echo",
     "test": "vitest run",
