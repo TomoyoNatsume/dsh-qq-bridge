@@ -28,7 +28,8 @@ export async function apply(ctx, options) {
     const entry = DshQqBridgeConfig.parse(options);
     const runtime = createBridgeRuntime(ctx);
     const settings = await installQqBridgeSettings(ctx, entry, (next) => runtime.reconcile(next));
-    await runtime.reconcile(DshQqBridgeConfig.parse(settings?.current() ?? entry));
+    if (settings === undefined)
+        await runtime.reconcile(entry);
     return async () => {
         settings?.dispose();
         await runtime.dispose();

@@ -96,6 +96,9 @@ export async function installQqBridgeSettings(
       applies: 'restart',
     })
     current = DshQqBridgeConfig.parse(scope.get())
+    Promise.resolve(onChange?.(current)).catch((err) => {
+      console.warn(`[dsh-qq-bridge] failed to apply initial settings: ${err instanceof Error ? err.message : String(err)}`)
+    })
     const unwatch = scope.watch((next) => {
       current = DshQqBridgeConfig.parse(next)
       Promise.resolve(onChange?.(current)).catch((err) => {
