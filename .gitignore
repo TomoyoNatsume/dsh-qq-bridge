@@ -17,3 +17,5 @@ coverage/
 
 # skills
 .agents
+
+.release_npm.bash
