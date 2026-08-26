@@ -6,6 +6,7 @@ export interface NapcatSettingsStatus {
     installed: boolean;
     adminQq?: number;
     runtime?: NapcatRuntimeState;
+    runningQqs?: number[];
     login?: NapcatLoginState;
     logState?: NapcatLogPathState;
     rootPath: string;
@@ -18,6 +19,8 @@ export interface NapcatSettingsStatus {
         enabled: boolean;
     };
     onebotChanged?: boolean;
+    napcatStoppedQqs?: number[];
+    napcatStarted?: boolean;
     napcatRestarted?: boolean;
     commands: string[];
     message: string;
@@ -28,6 +31,8 @@ export interface InspectNapcatSettingsOptions {
     adminQq?: unknown;
     rootPath?: unknown;
     spawn?: typeof spawnSync;
+    onebotConfigWaitMs?: number;
+    onebotConfigRetryIntervalMs?: number;
 }
 export declare function inspectNapcatSettings(options?: InspectNapcatSettingsOptions): Promise<NapcatSettingsStatus>;
 export declare function setupNapcatForSettings(options?: InspectNapcatSettingsOptions): Promise<NapcatSettingsStatus>;

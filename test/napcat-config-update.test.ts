@@ -8,6 +8,7 @@ import {
   defaultNapcatLogDir,
   defaultNapcatLogPath,
   defaultOnebotConfigPath,
+  extractRunningNapcatQqs,
   updateOnebotConfig,
   waitForOnebotWsEndpoint,
 } from '../src/cli/napcat.js'
@@ -95,8 +96,43 @@ describe('setup NapCat environment classifier', () => {
     expect(classifyNapcatRuntime(0, 'NapCat 运行中')).toBe('running')
   })
 
+  it('only treats the requested QQ as running when status lists running accounts', () => {
+    const output = [
+      '检测到 1 个正在运行的 Napcat 实例:',
+      '',
+      '- 运行中: QQ 554616801 (PID: 1028)',
+    ].join('\n')
+
+    expect(extractRunningNapcatQqs(output)).toEqual(['554616801'])
+    expect(classifyNapcatRuntime(0, output, 554616801)).toBe('running')
+    expect(classifyNapcatRuntime(0, output, 4124124)).toBe('not-running')
+  })
+
+  it('extracts running QQ from NapCat multi-instance start errors', () => {
+    const output = [
+      '\u001b[0;1;31;91m错误：检测到正在运行的 Napcat 实例。禁止多开。\u001b[0m',
+      '\u001b[0;1;33;93m - PID: 1028, QQ: 554616801\u001b[0m',
+      "\u001b[0;1;33;93m请先使用 'napcat stop' 停止所有实例。\u001b[0m",
+    ].join('')
+
+    expect(extractRunningNapcatQqs(output)).toEqual(['554616801'])
+    expect(classifyNapcatRuntime(1, output, 43214123)).toBe('not-running')
+  })
+
+  it('treats a NapCat instance listing without the requested QQ as not running even when parsing is sparse', () => {
+    const output = [
+      '检测到 1 个正在运行的 Napcat 实例:',
+      '',
+      '- 运行中: 当前账号暂不可见 (PID: 1028)',
+    ].join('\n')
+
+    expect(extractRunningNapcatQqs(output)).toEqual([])
+    expect(classifyNapcatRuntime(0, output, 4124124)).toBe('not-running')
+  })
+
   it('detects not-running status and non-zero fallback', () => {
     expect(classifyNapcatRuntime(0, 'NapCat not running')).toBe('not-running')
+    expect(classifyNapcatRuntime(0, '\u001b[0;1;31;91m没有 Napcat 服务正在运行。\u001b[0m', 4124124)).toBe('not-running')
     expect(classifyNapcatRuntime(1, '')).toBe('not-running')
   })
 

@@ -39,7 +39,8 @@ export declare function updateOnebotConfigFile(path: string): Promise<OneBotConf
 export declare function waitForOnebotWsEndpoint(options: OnebotWsEndpointCheckOptions): Promise<OnebotWsEndpointCheckResult>;
 export declare function updateOnebotConfig(raw: string): OneBotConfigUpdate;
 export declare function napcatConfigExists(qq: number): boolean;
-export declare function classifyNapcatRuntime(exitCode: number | null, output: string): NapcatRuntimeState;
+export declare function classifyNapcatRuntime(exitCode: number | null, output: string, targetQq?: number | string): NapcatRuntimeState;
+export declare function extractRunningNapcatQqs(output: string): string[];
 export declare function classifyNapcatLogin(output: string): NapcatLoginState;
 export declare function classifyNapcatLogPaths(snapshot: NapcatLogPathSnapshot): NapcatLogPathState;
 export declare function canAcceptUserConfirmedLogin(params: {

@@ -319,7 +319,7 @@ function inspectNapcat(qq, napcatRoot) {
     const status = spawnSync('napcat', ['status', String(qq)], { encoding: 'utf8' });
     const output = [status.stdout, status.stderr].filter(Boolean).join('\n').trim();
     return {
-        runtime: classifyNapcatRuntime(status.status, output),
+        runtime: classifyNapcatRuntime(status.status, output, qq),
         login: classifyNapcatLogin(output),
         logState: classifyNapcatLogPaths({
             rootExists: existsSync(napcatRoot),

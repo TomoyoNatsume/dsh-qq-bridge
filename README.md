@@ -133,6 +133,8 @@ bash napcat.sh --docker n --cli y
 napcat help
 ```
 
+只需要安装 NapCat CLI，不需要自己先启动 QQ 后台。设置页填写 NapCat 登录 QQ 后点击“保存并启动”，目标 QQ 未运行时插件会先执行 `napcat stop` 顶掉现有 NapCat 实例，再按这个 QQ 号执行 `napcat start <QQ>`。首次使用时请打开 `~/Napcat/log/napcat_<你的QQ号>.log` 或执行 `napcat log <你的QQ号>` 查看日志并扫码登陆；NapCat 生成 OneBot 配置文件后，插件会继续写入正向 WebSocket 配置。
+
 > NapCat 扫码登录时请打开 setup 打印的日志。日志里可能有多个二维码，请拉到最后一个二维码扫码；如果二维码过期，在 setup 里选择“二维码过期”，它会重启 NapCat 生成新的登录请求。
 
 
@@ -142,8 +144,8 @@ napcat help
 设置页具体说明：
 - 选择 `NapCat / OneBot` 或 `腾讯官方 QQ Bot`。两种不同路径，前者为社区插件连接 QQ，非官方，功能强、限制少、通用性广，但小号容易被强制下线。后者为官方开放平台提供的 Bot，对接更稳，但是功能较少。
 - NapCat 路径需要输入 QQ 号（用于登录在 DSH 服务上、负责接收消息的号）、选择模型、单号/双号模式。单号模式下自己发送消息，自己接收（在 QQ 的好友列表里可以找到自己）。双号模式下两个号互相通信，需要输入发送端 QQ 号。
-- NapCat 路径会检查 `napcat status <QQ>`，未启动时自动执行 `napcat start <QQ>`。
-- NapCat 路径会自动配置 OneBot 正向 WebSocket：`127.0.0.1:3001`。配置后检查 OneBot WS 是否可连接；如果 NapCat 已退出或端口未监听，会写入 profile 并提示用户处理 NapCat 后手动重启 DSH web。
+- NapCat 路径会检查 `napcat status <QQ>`；目标 QQ 未启动时会先执行 `napcat stop` 顶掉现有 NapCat 实例，再自动执行 `napcat start <QQ>`。用户只需先安装 NapCat CLI，不必手动启动 QQ 后台。
+- NapCat 路径会自动配置 OneBot 正向 WebSocket：`127.0.0.1:3001`。如果尚未找到 OneBot 配置文件，设置页会提示打开 NapCat 日志或执行 `napcat log <QQ>` 扫码登陆；如果配置成功，设置页会提示继续查看日志，确保已经扫码登陆。
 - 官方 QQ Bot 路径会要求先[创建机器人](https://q.qq.com/#/apps)，输入 AppID、AppSecret、沙箱开关，并通过 `pair <code>` 自动配置 `adminOpenId`。
 
 >如果你是从旧版 setup 写 profile 的方式迁移到 bundle，新版启动时会自动清理 `~/.dsh/profiles/web/cordis.patch.yml` 里旧的 `id: dsh-qq-bridge` 插入项，并在同目录留下 `cordis.patch.yml.dsh-qq-bridge.bak` 备份，避免 bundle 和手写 profile 同时挂载同一个插件。

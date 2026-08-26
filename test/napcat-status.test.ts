@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -90,8 +91,17 @@ describe('NapCat settings status probe', () => {
 
     expect(status.state).toBe('ready')
     expect(status.login).toBe('not-logged-in')
-    expect(status.message).toContain('如果发送 "ping" 后没反应')
+    expect(status.message.split('\n')).toEqual(expect.arrayContaining([
+      '已启动 NapCat 进程，请打开 NapCat 日志文件',
+      join(root, 'log', 'napcat_10001.log'),
+      '或执行',
+      'napcat log 10001',
+      '查看日志，确保已经扫码登陆。',
+    ]))
+    expect(status.message).toContain('已启动 NapCat 进程')
+    expect(status.message).toContain('打开 NapCat 日志文件')
     expect(status.message).toContain('napcat log 10001')
+    expect(status.message).toContain('确保已经扫码登陆')
     expect(server.enable).toBe(true)
     expect(server.host).toBe('127.0.0.1')
     expect(server.port).toBe(3001)
@@ -99,16 +109,194 @@ describe('NapCat settings status probe', () => {
     expect(server.token.length).toBeGreaterThan(8)
     expect(status.onebot?.token).toBe(server.token)
   })
+
+  it('stops existing NapCat instances before starting a new QQ', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-autostart-'))
+    await mkdir(join(root, 'log'), { recursive: true })
+    const stopArgs: string[] = []
+    let started = false
+    let restarted = false
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    const configPath = join(configDir, 'onebot11_10001.json')
+
+    const status = await setupNapcatForSettings({
+      adminQq: '10001',
+      rootPath: root,
+      spawn: fakeSpawn({
+        statusOutput: () => started
+          ? '检测到 1 个正在运行的 Napcat 实例:\n\n- 运行中: QQ 10001 (PID: 2048)'
+          : '检测到 1 个正在运行的 Napcat 实例:\n\n- 运行中: QQ 554616801 (PID: 1028)',
+        onStop: (qq) => {
+          stopArgs.push(qq)
+        },
+        onStart: () => {
+          started = true
+          mkdirSync(configDir, { recursive: true })
+          writeFileSync(configPath, JSON.stringify({}), 'utf8')
+        },
+        onRestart: () => {
+          restarted = true
+        },
+      }),
+      onebotConfigWaitMs: 10,
+      onebotConfigRetryIntervalMs: 1,
+    })
+    const written = JSON.parse(await readFile(configPath, 'utf8'))
+    const server = written.network.websocketServers[0]
+
+    expect(stopArgs).toEqual([''])
+    expect(started).toBe(true)
+    expect(restarted).toBe(true)
+    expect(status.state).toBe('ready')
+    expect(status.napcatStoppedQqs).toBeUndefined()
+    expect(status.napcatStarted).toBe(true)
+    expect(status.message).toContain('已执行 napcat stop 并执行 napcat start 10001')
+    expect(server.enable).toBe(true)
+    expect(server.host).toBe('127.0.0.1')
+    expect(server.port).toBe(3001)
+  })
+
+  it('retries start after direct stop when the first start reports another QQ', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-start-retry-'))
+    await mkdir(join(root, 'log'), { recursive: true })
+    const stopArgs: string[] = []
+    let startCount = 0
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    const configPath = join(configDir, 'onebot11_43214123.json')
+
+    const status = await setupNapcatForSettings({
+      adminQq: '43214123',
+      rootPath: root,
+      spawn: fakeSpawn({
+        statusOutput: '没有 Napcat 服务正在运行。',
+        startStatus: () => startCount === 1 ? 1 : 0,
+        startOutput: () => startCount === 1
+          ? [
+              '\u001b[0;1;31;91m错误：检测到正在运行的 Napcat 实例。禁止多开。\u001b[0m',
+              '\u001b[0;1;33;93m - PID: 1028, QQ: 554616801\u001b[0m',
+              "\u001b[0;1;33;93m请先使用 'napcat stop' 停止所有实例。\u001b[0m",
+            ].join('')
+          : 'started',
+        onStop: (qq) => {
+          stopArgs.push(qq)
+        },
+        onStart: () => {
+          startCount += 1
+          if (startCount === 2) {
+            mkdirSync(configDir, { recursive: true })
+            writeFileSync(configPath, JSON.stringify({}), 'utf8')
+          }
+        },
+      }),
+      onebotConfigWaitMs: 10,
+      onebotConfigRetryIntervalMs: 1,
+    })
+
+    expect(startCount).toBe(2)
+    expect(stopArgs).toEqual(['', ''])
+    expect(status.napcatStoppedQqs).toBeUndefined()
+    expect(status.napcatStarted).toBe(true)
+  })
+
+  it('stops all NapCat instances and retries when a failed start omits the blocking QQ', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-start-retry-all-'))
+    await mkdir(join(root, 'log'), { recursive: true })
+    const stopArgs: string[] = []
+    let startCount = 0
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    const configPath = join(configDir, 'onebot11_32412341.json')
+
+    const status = await setupNapcatForSettings({
+      adminQq: '32412341',
+      rootPath: root,
+      spawn: fakeSpawn({
+        statusOutput: '没有 Napcat 服务正在运行。',
+        startStatus: () => startCount === 1 ? 1 : 0,
+        startOutput: () => startCount === 1
+          ? '错误：检测到正在运行的 Napcat 实例。禁止多开。'
+          : 'started',
+        onStop: (qq) => {
+          stopArgs.push(qq)
+        },
+        onStart: () => {
+          startCount += 1
+          if (startCount === 2) {
+            mkdirSync(configDir, { recursive: true })
+            writeFileSync(configPath, JSON.stringify({}), 'utf8')
+          }
+        },
+      }),
+      onebotConfigWaitMs: 10,
+      onebotConfigRetryIntervalMs: 1,
+    })
+
+    expect(startCount).toBe(2)
+    expect(stopArgs).toEqual(['', ''])
+    expect(status.napcatStarted).toBe(true)
+  })
+
+  it('reports a friendly message when the QQ onebot config file is missing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-missing-config-'))
+    await mkdir(join(root, 'log'), { recursive: true })
+
+    try {
+      await setupNapcatForSettings({
+        adminQq: '432141235',
+        rootPath: root,
+        spawn: fakeSpawn({ statusOutput: 'running online' }),
+      })
+      throw new Error('expected setup to fail')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      expect(message.split('\n')).toEqual([
+        '已启动 NapCat 进程，请打开 NapCat 日志文件',
+        join(root, 'log', 'napcat_432141235.log'),
+        '或执行',
+        'napcat log 432141235',
+        '查看日志，扫码登陆。',
+      ])
+      expect(message).toContain('已启动 NapCat 进程')
+      expect(message).toContain('打开 NapCat 日志文件')
+      expect(message).toContain('扫码登陆')
+      expect(message).toContain('napcat log 432141235')
+      expect(message).not.toContain('尚未找到该 QQ 的 NapCat OneBot 配置文件')
+      expect(message).not.toContain('路径:')
+      expect(message).not.toContain('排查命令')
+      expect(message).not.toContain('napcat status 432141235')
+      expect(message).not.toContain('ENOENT')
+      expect(message).not.toContain('open ')
+    }
+  })
 })
 
 function fakeSpawn(options: {
   missing?: boolean
-  statusOutput?: string
+  statusOutput?: string | (() => string)
+  startStatus?: number | (() => number)
+  startOutput?: string | (() => string)
+  onStop?: (qq: string) => void
+  onStart?: (qq: string) => void
+  onRestart?: () => void
 }): typeof import('node:child_process').spawnSync {
   return ((command: string, args?: readonly string[]) => {
     if (options.missing) return { error: Object.assign(new Error('missing'), { code: 'ENOENT' }) }
     if (command === 'napcat' && args?.[0] === 'status') {
-      return { status: 0, stdout: options.statusOutput ?? '', stderr: '' }
+      const output = typeof options.statusOutput === 'function' ? options.statusOutput() : options.statusOutput
+      return { status: 0, stdout: output ?? '', stderr: '' }
+    }
+    if (command === 'napcat' && args?.[0] === 'start') {
+      options.onStart?.(String(args[1] ?? ''))
+      const status = typeof options.startStatus === 'function' ? options.startStatus() : options.startStatus
+      const output = typeof options.startOutput === 'function' ? options.startOutput() : options.startOutput
+      return { status: status ?? 0, stdout: status === undefined || status === 0 ? output ?? 'started' : '', stderr: status !== undefined && status !== 0 ? output ?? '' : '' }
+    }
+    if (command === 'napcat' && args?.[0] === 'stop') {
+      options.onStop?.(String(args[1] ?? ''))
+      return { status: 0, stdout: 'stopped', stderr: '' }
+    }
+    if (command === 'napcat' && args?.[0] === 'restart') {
+      options.onRestart?.()
+      return { status: 0, stdout: 'restarted', stderr: '' }
     }
     return { status: 0, stdout: 'napcat help', stderr: '' }
   }) as typeof import('node:child_process').spawnSync

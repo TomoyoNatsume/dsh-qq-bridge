@@ -159,8 +159,17 @@ export function napcatConfigExists(qq: number): boolean {
   return existsSync(defaultOnebotConfigPath(qq))
 }
 
-export function classifyNapcatRuntime(exitCode: number | null, output: string): NapcatRuntimeState {
-  const text = output.toLowerCase()
+export function classifyNapcatRuntime(exitCode: number | null, output: string, targetQq?: number | string): NapcatRuntimeState {
+  const normalized = stripAnsi(output)
+  const runningQqs = extractRunningNapcatQqs(normalized)
+  const target = String(targetQq ?? '').trim()
+  if (/^\d+$/.test(target) && (runningQqs.length > 0 || isNapcatInstanceListing(normalized))) {
+    return runningQqs.includes(target) ? 'running' : 'not-running'
+  }
+  const text = normalized.toLowerCase()
+  if (isNoNapcatRunningText(text)) {
+    return 'not-running'
+  }
   if (matchesAny(text, ['not running', 'stopped', 'inactive', '未启动', '未运行', '已停止', '没有运行'])) {
     return 'not-running'
   }
@@ -169,6 +178,35 @@ export function classifyNapcatRuntime(exitCode: number | null, output: string): 
   }
   if (exitCode === 0) return 'running'
   return 'not-running'
+}
+
+export function extractRunningNapcatQqs(output: string): string[] {
+  const values = new Set<string>()
+  for (const line of stripAnsi(output).split(/\r?\n/)) {
+    const text = line.toLowerCase()
+    if (isNoNapcatRunningText(text)) continue
+    if (matchesAny(text, ['not running', 'stopped', 'inactive', '未启动', '未运行', '已停止', '没有运行'])) continue
+    if (!matchesAny(text, ['running', 'active', 'started', 'pid', '运行中', '已启动', '正在运行'])) continue
+    for (const match of line.matchAll(/QQ\D{0,32}(\d{5,15})/gi)) {
+      values.add(match[1])
+    }
+  }
+  return [...values]
+}
+
+function isNapcatInstanceListing(output: string): boolean {
+  return /检测到\s*\d+\s*个[^\n\r]*napcat[^\n\r]*实例/i.test(output)
+    || /running[^\n\r]*napcat[^\n\r]*instances?/i.test(output)
+}
+
+function isNoNapcatRunningText(text: string): boolean {
+  return /没有\s*napcat\s*服务\s*正在运行/i.test(text)
+    || /(^|\n|\r)[^\n\r]*没有[^\n\r]*(正在运行|运行中)/.test(text)
+    || /no\s+napcat\s+(service\s+)?(is\s+)?running/i.test(text)
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, '')
 }
 
 export function classifyNapcatLogin(output: string): NapcatLoginState {
