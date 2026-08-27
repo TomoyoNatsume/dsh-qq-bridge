@@ -213,7 +213,15 @@ platform: napcat
 napcat:
   wsUrl: ws://127.0.0.1:3001
   token: "<NapCat OneBot access token>"
+  selfKeepAlive:
+    enabled: true
+    intervalSeconds: 600
+    message: "[dsh-qq-bridge] keepalive"
 ```
+
+NapCat 模式默认每 600 秒让登录账号给自己发送一次保活消息。可以在设置页的“保活间隔（秒）”中调整；保活消息会被 bridge 内部过滤，不会触发 Agent。如不需要，可关闭“启用 NapCat 自发消息保活”。旧版 `intervalMs` 配置会自动换算为秒。
+
+每条保活消息都会附带唯一 `uid`。Bridge 最多等待 OneBot 动作响应 2 秒；连续 3 次超时会在 DSH 日志中将 NapCat 登录状态标记为 `logged-out`，任意一次成功则立即标记或恢复为 `logged-in`。
 
 #### 腾讯官方 QQ Bot
 

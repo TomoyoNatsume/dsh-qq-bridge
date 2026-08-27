@@ -191,6 +191,11 @@ async function buildQqBridgeSettingsSchema(): Promise<unknown | undefined> {
       wsUrl: z.string().default('ws://127.0.0.1:3001'),
       token: secret(z.string().default('')),
       guideDoc: z.string().default('docs/agent-napcat-guide.md'),
+      selfKeepAlive: z.object({
+        enabled: z.boolean().default(true),
+        intervalSeconds: z.number().step?.(1).min?.(1).default(600) ?? z.number().default(600),
+        message: z.string().default('[dsh-qq-bridge] keepalive'),
+      }),
     }),
     official: z.object({
       appId: z.string().default(''),

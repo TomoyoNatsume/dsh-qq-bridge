@@ -49,14 +49,23 @@ export declare class OnebotClient {
     /** 动作回调路径;默认按协议拼 JSON。可用 in-memory 替换以测试回发。 */
     private readonly sendAction?;
     private unsub;
+    private readonly pendingActions;
     constructor(transport: Transport, 
     /** 动作回调路径;默认按协议拼 JSON。可用 in-memory 替换以测试回发。 */
     sendAction?: ((frame: Record<string, unknown>) => Promise<void>) | undefined);
     connect(): Promise<void>;
     onMessage(cb: (evt: OnebotMessageEvent) => void): () => void;
     private handleFrame;
+    /** 发送私聊并等待相同 echo 的 OneBot 动作响应，供保活健康探测使用。 */
+    sendPrivateAndWait(userId: MessageTargetId, message: string, timeoutMs: number, uid: string): Promise<OnebotActionResponse>;
     sendPrivate(userId: MessageTargetId, message: string, _replyTarget?: PlatformReplyTarget): Promise<OnebotActionResponse>;
     sendGroup(groupId: MessageTargetId, message: string, _replyTarget?: PlatformReplyTarget): Promise<OnebotActionResponse>;
     private flush;
     disconnect(): Promise<void>;
+}
+export declare class OnebotActionTimeoutError extends Error {
+    readonly echo: string;
+    readonly timeoutMs: number;
+    readonly name = "OnebotActionTimeoutError";
+    constructor(echo: string, timeoutMs: number);
 }

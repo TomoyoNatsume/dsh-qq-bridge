@@ -116,6 +116,11 @@ window.__ModuleLoader__.load({
             setSaving(false);
             return;
           }
+          if (!Number.isFinite(draft.napcat.selfKeepAliveIntervalSeconds) || draft.napcat.selfKeepAliveIntervalSeconds <= 0) {
+            setMessage("保活间隔必须是大于 0 的秒数。");
+            setSaving(false);
+            return;
+          }
         }
         try {
           if (draft.platform === "napcat") {
@@ -240,9 +245,21 @@ window.__ModuleLoader__.load({
         : null;
       const modeSwitch = switchModeControl(accountMode, disabled, updateAccountMode);
       const logField = readonlyField("NapCat 日志路径", napcatLogPathText(status, draft));
+      const keepAliveFields = h("div", { style: styles.grid },
+        h("label", { style: styles.checkbox },
+          h("input", {
+            type: "checkbox",
+            checked: draft.napcat.selfKeepAliveEnabled,
+            disabled,
+            onChange: (event) => update(["napcat", "selfKeepAliveEnabled"], event.currentTarget.checked),
+          }),
+          h("span", null, "启用 NapCat 自发消息保活"),
+        ),
+        numberField("保活间隔（秒）", draft.napcat.selfKeepAliveIntervalSeconds, disabled, (value) => update(["napcat", "selfKeepAliveIntervalSeconds"], value), { min: 1, step: 1 }),
+      );
       const setupGuide = napcatSetupGuide(showGuide, setShowGuide, napcatLoginQqText(draft));
       if (status.state === "loading") {
-        return h("div", { style: styles.stack }, setupGuide, modeSwitch, loginField, senderField, logField, warnCard("正在检测 NapCat...", [], "status"));
+        return h("div", { style: styles.stack }, setupGuide, modeSwitch, loginField, senderField, logField, keepAliveFields, warnCard("正在检测 NapCat...", [], "status"));
       }
       if (status.state === "not-installed") {
         return h("div", { style: styles.stack },
@@ -251,6 +268,7 @@ window.__ModuleLoader__.load({
           loginField,
           senderField,
           logField,
+          keepAliveFields,
           warnCard(status.message, status.commands || [], "alert"),
         );
       }
@@ -261,6 +279,7 @@ window.__ModuleLoader__.load({
           loginField,
           senderField,
           logField,
+          keepAliveFields,
           warnCard(status.message, status.commands || [], "status"),
         );
       }
@@ -271,6 +290,7 @@ window.__ModuleLoader__.load({
           loginField,
           senderField,
           logField,
+          keepAliveFields,
           warnCard(status.message, status.commands || [], "alert"),
         );
       }
@@ -287,6 +307,7 @@ window.__ModuleLoader__.load({
           logField,
           textField("命令前缀", draft.access.commandPrefix, disabled, (value) => update(["access", "commandPrefix"], value), "text", { placeholder: "(空)" }),
         ),
+        keepAliveFields,
         h("p", { style: styles.subtle }, status.message),
       );
     }
@@ -475,8 +496,8 @@ window.__ModuleLoader__.load({
         : { label: "保存后启用", style: styles.tagReady, title: "点击“保存并启动”后会写入配置并启动 bridge。" };
     }
 
-    function numberField(label, value, disabled, onChange) {
-      return textField(label, value === undefined ? "" : String(value), disabled, (next) => onChange(Number(next) || 0), "number");
+    function numberField(label, value, disabled, onChange, extra = {}) {
+      return textField(label, value === undefined ? "" : String(value), disabled, (next) => onChange(Number(next) || 0), "number", extra);
     }
 
     function selectField(label, value, options, disabled, onChange) {
@@ -551,6 +572,8 @@ window.__ModuleLoader__.load({
           accountMode,
           loginQqText: napcatLoginQq > 0 ? String(napcatLoginQq) : accountMode === "single" && accessAdminQq > 0 ? String(accessAdminQq) : "",
           wsUrl: source.napcat?.wsUrl ?? "ws://127.0.0.1:3001",
+          selfKeepAliveEnabled: source.napcat?.selfKeepAlive?.enabled !== false,
+          selfKeepAliveIntervalSeconds: Number(source.napcat?.selfKeepAlive?.intervalSeconds ?? ((source.napcat?.selfKeepAlive?.intervalMs ?? 600000) / 1000)),
         },
         official: {
           appId: source.official?.appId ?? "",
@@ -606,6 +629,11 @@ window.__ModuleLoader__.load({
         set(["platform"], draft.platform),
         set(["napcat", "loginQq"], loginQq),
         set(["napcat", "wsUrl"], detectedOnebot?.wsUrl ?? draft.napcat.wsUrl),
+        set(["napcat", "selfKeepAlive"], {
+          enabled: draft.napcat.selfKeepAliveEnabled,
+          intervalSeconds: draft.napcat.selfKeepAliveIntervalSeconds,
+          message: "[dsh-qq-bridge] keepalive",
+        }),
         set(["official", "appId"], draft.official.appId),
         set(["official", "adminOpenId"], draft.official.adminOpenId),
         set(["official", "allowlistOpenIds"], splitLines(draft.official.allowlistOpenIdsText)),

@@ -156,6 +156,11 @@ export class WsTransport implements Transport {
  */
 export class OnebotClient {
   private unsub: (() => void) | null = null
+  private readonly pendingActions = new Map<string, {
+    resolve(response: OnebotActionResponse): void
+    reject(error: Error): void
+    timer: NodeJS.Timeout
+  }>()
 
   constructor(
     private readonly transport: Transport,
@@ -175,8 +180,43 @@ export class OnebotClient {
   }
 
   private handleFrame(frame: Record<string, unknown>): void {
-    // 目前事件透传由 onMessage 完成;这里保留扩展点(处理 echo/action 响应等)
-    if (frame.echo !== undefined) return
+    if (typeof frame.echo !== 'string') return
+    const pending = this.pendingActions.get(frame.echo)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.pendingActions.delete(frame.echo)
+    pending.resolve(frame as unknown as OnebotActionResponse)
+  }
+
+  /** 发送私聊并等待相同 echo 的 OneBot 动作响应，供保活健康探测使用。 */
+  async sendPrivateAndWait(
+    userId: MessageTargetId,
+    message: string,
+    timeoutMs: number,
+    uid: string,
+  ): Promise<OnebotActionResponse> {
+    const echo = `keepalive_${uid}`
+    const response = new Promise<OnebotActionResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingActions.delete(echo)
+        reject(new OnebotActionTimeoutError(echo, timeoutMs))
+      }, timeoutMs)
+      timer.unref?.()
+      this.pendingActions.set(echo, { resolve, reject, timer })
+    })
+    try {
+      await this.flush({ action: 'send_private_msg', params: { user_id: userId, message }, echo })
+    } catch (err) {
+      const pending = this.pendingActions.get(echo)
+      if (pending) clearTimeout(pending.timer)
+      this.pendingActions.delete(echo)
+      throw err
+    }
+    const result = await response
+    if (result.status !== 'ok' || result.retcode !== 0) {
+      throw new Error(`OneBot send failed: retcode=${result.retcode}`)
+    }
+    return result
   }
 
   async sendPrivate(
@@ -208,8 +248,21 @@ export class OnebotClient {
   }
 
   async disconnect(): Promise<void> {
+    for (const pending of this.pendingActions.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error('onebot client disconnected'))
+    }
+    this.pendingActions.clear()
     this.unsub?.()
     this.unsub = null
     await this.transport.dispose()
+  }
+}
+
+export class OnebotActionTimeoutError extends Error {
+  override readonly name = 'OnebotActionTimeoutError'
+
+  constructor(readonly echo: string, readonly timeoutMs: number) {
+    super(`OneBot action timeout after ${timeoutMs}ms: ${echo}`)
   }
 }

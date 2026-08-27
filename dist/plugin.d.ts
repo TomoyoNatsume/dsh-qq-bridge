@@ -103,6 +103,7 @@ interface BridgeChatClient {
     connect(): Promise<void>;
     onMessage(cb: (evt: OnebotMessageEvent) => void): () => void;
     sendPrivate(userId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>;
+    sendPrivateAndWait?(userId: MessageTargetId, message: string, timeoutMs: number, uid: string): Promise<unknown>;
     sendGroup(groupId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>;
     disconnect(): Promise<void>;
 }

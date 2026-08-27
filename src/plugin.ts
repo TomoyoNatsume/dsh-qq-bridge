@@ -40,6 +40,7 @@ import type { MessageTargetId } from './onebot/types.js'
 import { InteractionCtxLike, QqInteractionBridge } from './interactions.js'
 import { DshWebActivityGate } from './web-activity.js'
 import { installQqBridgeSettings } from './settings.js'
+import { isNapcatSelfKeepAliveMessage, startNapcatSelfKeepAlive } from './onebot/self-keepalive.js'
 
 /** DSH live agent 最小画面。 */
 interface DshAgent {
@@ -135,6 +136,7 @@ interface BridgeChatClient {
   connect(): Promise<void>
   onMessage(cb: (evt: OnebotMessageEvent) => void): () => void
   sendPrivate(userId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>
+  sendPrivateAndWait?(userId: MessageTargetId, message: string, timeoutMs: number, uid: string): Promise<unknown>
   sendGroup(groupId: MessageTargetId, message: string, replyTarget?: PlatformReplyTarget): Promise<unknown>
   disconnect(): Promise<void>
 }
@@ -299,6 +301,7 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
   // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
   // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
   const unsubMessages = client.onMessage((evt: OnebotMessageEvent) => {
+    if (!officialMode && isNapcatSelfKeepAliveMessage(evt.raw_message, cfg.napcat.selfKeepAlive.message)) return
     void router.route(evt)
   })
   client.connect().catch((err) => {
@@ -306,6 +309,18 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
       officialMode ? buildOfficialConnectGuidance(cfg, err) : buildConnectGuidance(cfg, err)
     ))
   })
+
+  const stopSelfKeepAlive = officialMode
+    ? () => {}
+    : startNapcatSelfKeepAlive({
+        enabled: cfg.napcat.selfKeepAlive.enabled,
+        intervalMs: cfg.napcat.selfKeepAlive.intervalSeconds * 1000,
+        message: cfg.napcat.selfKeepAlive.message,
+        targetId: cfg.napcat.loginQq || cfg.access.adminQq,
+        sendPrivate: (targetId, message, uid) => client.sendPrivateAndWait
+          ? client.sendPrivateAndWait(targetId, message, 2000, uid)
+          : client.sendPrivate(targetId, message),
+      })
 
   let selfLogInput: NapcatSelfLogInput | undefined
   if (!officialMode && cfg.selfLogInput.enabled) {
@@ -317,7 +332,10 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
       pollIntervalMs: cfg.selfLogInput.pollIntervalMs,
       replayOnStart: cfg.selfLogInput.replayOnStart,
     })
-    selfLogInput.start((evt) => void router.route(evt)).catch((err) => {
+    selfLogInput.start((evt) => {
+      if (isNapcatSelfKeepAliveMessage(evt.raw_message, cfg.napcat.selfKeepAlive.message)) return
+      void router.route(evt)
+    }).catch((err) => {
       console.warn(`[dsh-qq-bridge] self log input failed: ${err instanceof Error ? err.message : String(err)}`)
     })
   }
@@ -333,6 +351,7 @@ async function startQqBridge(ctx: DshCtx, cfg: DshQqBridgeConfig): Promise<() =>
     storageDomainAccess.dispose()
     workspaceAttachment.dispose()
     taskScheduler.dispose()
+    stopSelfKeepAlive()
     await customMemoryStore.close()
     unsubMessages()
     replyNotifier()

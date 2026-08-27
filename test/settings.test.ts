@@ -58,5 +58,6 @@ describe('QQ bridge settings runtime wiring', () => {
     expect(applied).toHaveLength(1)
     expect(applied[0].enabled).toBe(true)
     expect(applied[0].napcat.token).toBe('token-from-settings')
+    expect(applied[0].napcat.selfKeepAlive.intervalSeconds).toBe(600)
   })
 })

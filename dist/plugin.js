@@ -17,6 +17,7 @@ import { TencentOfficialBotClient } from './official/client.js';
 import { QqInteractionBridge } from './interactions.js';
 import { DshWebActivityGate } from './web-activity.js';
 import { installQqBridgeSettings } from './settings.js';
+import { isNapcatSelfKeepAliveMessage, startNapcatSelfKeepAlive } from './onebot/self-keepalive.js';
 /**
  * Cordis 插件入口(Host 侧)。
  * M3:每个 QQ 会话持有常驻 DSH live agent,实现多轮上下文。
@@ -171,11 +172,24 @@ async function startQqBridge(ctx, cfg) {
     // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
     // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
     const unsubMessages = client.onMessage((evt) => {
+        if (!officialMode && isNapcatSelfKeepAliveMessage(evt.raw_message, cfg.napcat.selfKeepAlive.message))
+            return;
         void router.route(evt);
     });
     client.connect().catch((err) => {
         console.warn('[dsh-qq-bridge] ' + (officialMode ? buildOfficialConnectGuidance(cfg, err) : buildConnectGuidance(cfg, err)));
     });
+    const stopSelfKeepAlive = officialMode
+        ? () => { }
+        : startNapcatSelfKeepAlive({
+            enabled: cfg.napcat.selfKeepAlive.enabled,
+            intervalMs: cfg.napcat.selfKeepAlive.intervalSeconds * 1000,
+            message: cfg.napcat.selfKeepAlive.message,
+            targetId: cfg.napcat.loginQq || cfg.access.adminQq,
+            sendPrivate: (targetId, message, uid) => client.sendPrivateAndWait
+                ? client.sendPrivateAndWait(targetId, message, 2000, uid)
+                : client.sendPrivate(targetId, message),
+        });
     let selfLogInput;
     if (!officialMode && cfg.selfLogInput.enabled) {
         const logPath = cfg.selfLogInput.logPath?.trim() || `${homedir()}/Napcat/log/napcat_${cfg.access.adminQq}.log`;
@@ -186,7 +200,11 @@ async function startQqBridge(ctx, cfg) {
             pollIntervalMs: cfg.selfLogInput.pollIntervalMs,
             replayOnStart: cfg.selfLogInput.replayOnStart,
         });
-        selfLogInput.start((evt) => void router.route(evt)).catch((err) => {
+        selfLogInput.start((evt) => {
+            if (isNapcatSelfKeepAliveMessage(evt.raw_message, cfg.napcat.selfKeepAlive.message))
+                return;
+            void router.route(evt);
+        }).catch((err) => {
             console.warn(`[dsh-qq-bridge] self log input failed: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
@@ -201,6 +219,7 @@ async function startQqBridge(ctx, cfg) {
         storageDomainAccess.dispose();
         workspaceAttachment.dispose();
         taskScheduler.dispose();
+        stopSelfKeepAlive();
         await customMemoryStore.close();
         unsubMessages();
         replyNotifier();
