@@ -36,9 +36,9 @@ window.__ModuleLoader__.load({
       const [snapshot, setSnapshot] = React.useState(() => props.scope.getSnapshot());
       const [draft, setDraft] = React.useState(() => draftFrom(snapshot.value));
       const [dirty, setDirty] = React.useState(false);
-      const [saving, setSaving] = React.useState(false);
+      const [pendingAction, setPendingAction] = React.useState("");
       const [message, setMessage] = React.useState("");
-      const [napcatStatus, setNapcatStatus] = React.useState({ state: "idle", message: "保存配置时会检测 NapCat 并配置 OneBot。" });
+      const [napcatStatus, setNapcatStatus] = React.useState({ state: "idle", message: "正在等待检测 NapCat 状态。" });
       const [hostInfo, setHostInfo] = React.useState({ homeDir: "" });
 
       React.useEffect(() => props.scope.subscribe(() => {
@@ -60,6 +60,25 @@ window.__ModuleLoader__.load({
           alive = false;
         };
       }, [props.rpc, dirty]);
+
+      React.useEffect(() => {
+        if (draft.platform !== "napcat") return undefined;
+        let alive = true;
+        const timer = setTimeout(() => {
+          setNapcatStatus({ state: "loading", message: "正在检测 NapCat 状态..." });
+          callNapcatStatus(props.rpc, napcatLoginQqText(draft)).then((status) => {
+            if (alive) setNapcatStatus(status);
+          }).catch((error) => {
+            if (!alive) return;
+            const text = error instanceof Error ? error.message : String(error);
+            setNapcatStatus({ state: "unavailable", message: text, commands: [] });
+          });
+        }, 250);
+        return () => {
+          alive = false;
+          clearTimeout(timer);
+        };
+      }, [props.rpc, draft.platform, draft.napcat.accountMode, draft.napcat.loginQqText, draft.access.adminQqText]);
 
       const update = (path, value) => {
         setDirty(true);
@@ -102,74 +121,118 @@ window.__ModuleLoader__.load({
         });
       };
       const save = async () => {
-        setSaving(true);
-        setMessage("");
-        let setupStatus = napcatStatus;
-        if (draft.platform === "napcat") {
-          if (!/^\d+$/.test(napcatLoginQqText(draft).trim())) {
-            setMessage("NapCat 登录 QQ 只允许输入数字，且不能为空。");
-            setSaving(false);
-            return;
-          }
-          if (draft.napcat.accountMode === "dual" && !/^\d+$/.test(draft.access.adminQqText.trim())) {
-            setMessage("发送端 QQ 只允许输入数字，且不能为空。");
-            setSaving(false);
-            return;
-          }
-          if (!Number.isFinite(draft.napcat.selfKeepAliveIntervalSeconds) || draft.napcat.selfKeepAliveIntervalSeconds <= 0) {
-            setMessage("保活间隔必须是大于 0 的秒数。");
-            setSaving(false);
-            return;
-          }
+        const validationError = configurationError(draft);
+        if (validationError) {
+          setMessage(validationError);
+          return;
         }
+        setPendingAction("save");
+        setMessage("");
         try {
-          if (draft.platform === "napcat") {
-            setNapcatStatus({ state: "loading", message: "正在检测 NapCat 并执行 setup..." });
-            setupStatus = await callNapcatSetup(props.rpc, napcatLoginQqText(draft));
-            setNapcatStatus(setupStatus);
-          }
-          const ops = opsFromDraft(draft, setupStatus);
-          const response = await props.api.settings.mutate({
-            ns: NS,
-            ops,
-            ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }),
-          });
+          const response = await mutateSettings(props.api, snapshot, opsFromDraft(draft, napcatStatus, draft.enabled));
           if (!response.result.ok) {
             setMessage(response.result.error?.message || "保存失败");
           } else {
-            setDraft((prev) => {
-              let next = setPath(prev, ["enabled"], true);
-              if (draft.platform === "napcat") {
-                next = setPath(next, ["selfLogInput", "logPath"], napcatLogPathForSettings(draft, setupStatus));
-              }
-              return next;
-            });
             setDirty(false);
-            if (draft.platform === "napcat") {
-              setMessage(napcatLogHint(setupStatus, napcatLoginQqText(draft)));
-            } else {
-              setMessage("已保存并启用。QQ bridge 会在当前 DSH Web 进程中按新配置启动。");
-            }
+            setMessage("配置已保存。确认状态后可点击“启动服务”。");
           }
         } catch (error) {
-          const text = error instanceof Error ? error.message : String(error);
-          if (draft.platform === "napcat") {
-            setNapcatStatus({ state: "unavailable", message: text, commands: [] });
-          }
-          setMessage(text);
+          setMessage(error instanceof Error ? error.message : String(error));
         } finally {
-          setSaving(false);
+          setPendingAction("");
         }
       };
 
-      const disabled = snapshot.status !== "ready" || !snapshot.writable || saving;
+      const refreshNapcatStatus = async () => {
+        setPendingAction("refresh-napcat");
+        setMessage("");
+        setNapcatStatus({ state: "loading", message: "正在刷新 NapCat 状态..." });
+        try {
+          const status = await callNapcatStatus(props.rpc, napcatLoginQqText(draft));
+          setNapcatStatus(status);
+          setMessage("配置、安装、目标 QQ 进程和登录状态已刷新。");
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error);
+          setNapcatStatus({ state: "unavailable", message: text, commands: [] });
+          setMessage(text);
+        } finally {
+          setPendingAction("");
+        }
+      };
+
+      const startNapcat = async () => {
+        const loginQq = napcatLoginQqText(draft).trim();
+        if (!/^\d+$/.test(loginQq)) {
+          setMessage("NapCat 登录 QQ 只允许输入数字，且不能为空。");
+          return;
+        }
+        setPendingAction("start-napcat");
+        setMessage("");
+        setNapcatStatus({ state: "loading", message: "正在启动 NapCat..." });
+        try {
+          const status = await callNapcatStart(props.rpc, loginQq);
+          setNapcatStatus(status);
+          setMessage(status.message || `NapCat 已启动 QQ ${loginQq}。`);
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error);
+          setNapcatStatus({ state: "unavailable", message: text, commands: [] });
+          setMessage(text);
+        } finally {
+          setPendingAction("");
+        }
+      };
+
+      const start = async () => {
+        const validationError = configurationError(draft);
+        if (validationError) {
+          setMessage(validationError);
+          return;
+        }
+        if (dirty) {
+          setMessage("配置有未保存的修改，请先保存配置。");
+          return;
+        }
+        setPendingAction("start");
+        setMessage("");
+        let setupStatus = napcatStatus;
+        try {
+          if (draft.platform === "napcat") {
+            setNapcatStatus({ state: "loading", message: "正在启动 NapCat 并配置 OneBot..." });
+            setupStatus = await callNapcatSetup(props.rpc, napcatLoginQqText(draft));
+            setNapcatStatus(setupStatus);
+          }
+          const response = await mutateSettings(props.api, snapshot, opsFromDraft(draft, setupStatus, true));
+          if (!response.result.ok) {
+            setMessage(response.result.error?.message || "启动失败");
+          } else {
+            setDraft((prev) => setPath(prev, ["enabled"], true));
+            setMessage(draft.platform === "napcat"
+              ? napcatLogHint(setupStatus, napcatLoginQqText(draft))
+              : "服务已启动。QQ bridge 已在当前 DSH Web 进程中启用。");
+          }
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error);
+          if (draft.platform === "napcat") setNapcatStatus({ state: "unavailable", message: text, commands: [] });
+          setMessage(text);
+        } finally {
+          setPendingAction("");
+        }
+      };
+
+      const disabled = snapshot.status !== "ready" || !snapshot.writable || pendingAction !== "";
+      const startDisabled = disabled || dirty || !configurationComplete(draft);
+      const startNapcatDisabled = disabled
+        || draft.platform !== "napcat"
+        || !napcatStatus?.installed
+        || (napcatStatus?.runtime === "running" && napcatStatus?.login === "logged-in")
+        || !/^\d+$/.test(napcatLoginQqText(draft).trim());
       return h("div", { style: styles.page },
         h("div", { style: styles.header },
           h("div", { style: styles.titleRow },
             h("h2", { style: styles.title }, "QQ bridge"),
-            statusTag(draft, napcatStatus),
+            statusTags(draft, napcatStatus, dirty),
           ),
-          h("p", { style: styles.subtle }, "配置 QQ 到 DSH Agent 的桥接入口。保存配置后会在当前 DSH Web 进程中启动或重启 bridge。"),
+          h("p", { style: styles.subtle }, "先保存配置，再启动服务。NapCat 状态会按当前登录 QQ 自动检测。"),
         ),
         snapshot.status === "unavailable"
           ? h("p", { role: "alert", style: styles.error }, "当前连接不能写入本机设置，需在本机 loopback 的 DSH Web 中配置。")
@@ -183,6 +246,22 @@ window.__ModuleLoader__.load({
           draft.platform === "napcat"
             ? h(NapcatFields, { draft, disabled, update, updateAdminQq, updateNapcatLoginQq, updateAccountMode, status: napcatStatus })
             : h(OfficialFields, { draft, disabled, update }),
+          draft.platform === "napcat"
+            ? h("div", { style: styles.cardActions },
+                h("button", {
+                  type: "button",
+                  style: disabled ? styles.primaryDisabled : styles.secondary,
+                  disabled,
+                  onClick: refreshNapcatStatus,
+                }, pendingAction === "refresh-napcat" ? "刷新中..." : "刷新状态"),
+                h("button", {
+                  type: "button",
+                  style: startNapcatDisabled ? styles.primaryDisabled : styles.primary,
+                  disabled: startNapcatDisabled,
+                  onClick: startNapcat,
+                }, pendingAction === "start-napcat" ? "启动中..." : "启动 NapCat"),
+              )
+            : null,
         ),
         h("section", { style: styles.band },
           h("h3", { style: styles.sectionTitle }, "Agent"),
@@ -221,7 +300,10 @@ window.__ModuleLoader__.load({
         ),
         h("div", { style: styles.footer },
           h("button", { type: "button", style: disabled ? styles.primaryDisabled : styles.primary, disabled, onClick: save },
-            saving ? "保存并启动中..." : "保存并启动",
+            pendingAction === "save" ? "保存中..." : "保存配置",
+          ),
+          h("button", { type: "button", style: startDisabled ? styles.primaryDisabled : styles.primary, disabled: startDisabled, onClick: start },
+            pendingAction === "start" ? "启动中..." : "启动服务",
           ),
           message ? statusMessage(message, isErrorMessage(message)) : null,
         ),
@@ -283,7 +365,17 @@ window.__ModuleLoader__.load({
           warnCard(status.message, status.commands || [], "status"),
         );
       }
-      if (status.state === "not-running" || status.state === "unavailable") {
+      if (status.state === "not-running") {
+        return h("div", { style: styles.stack },
+          setupGuide,
+          modeSwitch,
+          loginField,
+          senderField,
+          logField,
+          keepAliveFields,
+        );
+      }
+      if (status.state === "unavailable") {
         return h("div", { style: styles.stack },
           setupGuide,
           modeSwitch,
@@ -333,7 +425,7 @@ window.__ModuleLoader__.load({
         h("ol", { style: styles.guideList },
           h("li", null, "确认环境是 Linux 或 WSL2，并确保本机能使用 node、npm、pnpm。"),
           h("li", null, "安装 NapCat CLI 后运行 napcat help，确认系统里已经有 napcat 命令。"),
-          h("li", null, "只需要安装 NapCat CLI，不需要自己先启动 QQ 后台；填写 NapCat 登录 QQ，点击“保存并启动”后插件会执行 napcat start。已有其他 QQ 运行时会先 stop 旧 QQ。"),
+          h("li", null, "只需要安装 NapCat CLI，不需要自己先启动 QQ 后台；填写 NapCat 登录 QQ 后，点击“启动 NapCat”，插件会直接执行 napcat start。已有其他 QQ 运行时会先 stop 旧 QQ。"),
           h("li", null, "NapCat 首次启动并生成配置文件后，插件会写入 OneBot 正向 WebSocket 配置。"),
           h("li", null, "扫码登录时打开最后生成的二维码；如果发送 ping 没反应，用日志命令确认是否已经登录。"),
         ),
@@ -432,8 +524,9 @@ window.__ModuleLoader__.load({
     }
 
     function statusMessage(message, error) {
-      return h("div", { role: "status", style: error ? styles.error : styles.ok },
-        normalizeCommandLines([message]).map((line, index) => messageLineNode(line, index, false)),
+      const napcatSetupInfo = !error && String(message || "").startsWith("已完成 NapCat/OneBot 配置。");
+      return h("div", { role: "status", style: error ? styles.error : napcatSetupInfo ? styles.successInfo : styles.ok },
+        normalizeCommandLines([message]).map((line, index) => messageLineNode(line, index, napcatSetupInfo && index === 0)),
       );
     }
 
@@ -468,32 +561,47 @@ window.__ModuleLoader__.load({
       return /失败|只允许|不能为空|请先|不可用|无法|无响应|未找到/.test(value);
     }
 
-    function statusTag(draft, napcatStatus) {
-      const status = bridgeStatus(draft, napcatStatus);
-      return h("span", { style: status.style, title: status.title, "aria-label": status.title }, status.label);
-    }
-
-    function bridgeStatus(draft, napcatStatus) {
+    function statusTags(draft, napcatStatus, dirty) {
+      const complete = configurationComplete(draft);
+      const tags = [{
+        label: complete && !dirty ? "配置已完成" : dirty ? "配置未保存" : "配置未完成",
+        style: complete && !dirty ? styles.tagOk : styles.tagWarn,
+        title: complete && !dirty ? "必填配置已经保存。" : dirty ? "当前修改尚未保存。" : configurationError(draft) || "请补全必填配置。",
+      }];
       if (draft.platform === "napcat") {
-        if (napcatStatus?.state === "loading") {
-          return { label: "检测中", style: styles.tagNeutral, title: "正在检测 NapCat 并执行 setup，请稍等。" };
-        }
-        if (napcatStatus?.state === "idle") {
-          return draft.enabled
-            ? { label: "已启用", style: styles.tagOk, title: "如果发送消息无响应，则打开napcat log确认是否已登陆" }
-            : { label: "保存后启用", style: styles.tagReady, title: "点击“保存并启动”后会检测 NapCat、写入配置并启动 bridge。" };
-        }
-        if (napcatStatus?.state !== "ready") {
-          return { label: "未就绪", style: styles.tagWarn, title: "请点击“保存并启动”，按提示安装或启动 NapCat。" };
-        }
-        if (draft.enabled) {
-          return { label: "已启用", style: styles.tagOk, title: "如果发送消息无响应，则打开napcat log确认是否已登陆" };
-        }
-        return { label: "保存后启用", style: styles.tagReady, title: "点击“保存并启动”后会检测 NapCat、写入配置并启动 bridge。" };
+        const loading = napcatStatus?.state === "loading" || napcatStatus?.state === "idle";
+        const unavailable = napcatStatus?.state === "unavailable";
+        const installed = napcatStatus?.installed === true;
+        const hasLoginQq = /^\d+$/.test(napcatLoginQqText(draft).trim());
+        tags.push({
+          label: loading ? "NapCat 检测中" : unavailable ? "NapCat 状态不可用" : installed ? "NapCat 已安装" : "NapCat 未安装",
+          style: loading || unavailable ? styles.tagNeutral : installed ? styles.tagOk : styles.tagWarn,
+          title: loading ? "正在检测本机 NapCat CLI。" : unavailable ? napcatStatus.message : installed ? "已检测到 NapCat CLI。" : "未检测到 NapCat CLI。",
+        });
+        const running = napcatStatus?.runtime === "running";
+        const runtimeBlocked = !installed || !hasLoginQq;
+        const runtimeUnknown = unavailable || napcatStatus?.runtime === "unknown";
+        tags.push({
+          label: loading ? "进程检测中" : runtimeBlocked ? "进程不可检测" : runtimeUnknown ? "进程状态未知" : running ? "目标 QQ 已启动" : "目标 QQ 未启动",
+          style: loading || runtimeBlocked || runtimeUnknown ? styles.tagNeutral : running ? styles.tagOk : styles.tagWarn,
+          title: loading ? "正在检测当前 QQ 的 NapCat 进程。" : !installed ? "安装 NapCat 后才能检测目标 QQ 进程。" : !hasLoginQq ? "填写 NapCat 登录 QQ 后才能检测对应进程。" : runtimeUnknown ? "NapCat 未返回明确的目标 QQ 进程状态。" : running ? `NapCat 已启动当前配置的 QQ ${napcatLoginQqText(draft)}。` : "已确认当前配置 QQ 对应的 NapCat 进程未启动。",
+        });
+        const loggedIn = napcatStatus?.login === "logged-in";
+        tags.push({
+          label: loggedIn ? "QQ 已登录" : "QQ 未登录",
+          style: loggedIn ? styles.tagOk : styles.tagWarn,
+          title: loggedIn ? "OneBot WebSocket 已完成连接和鉴权，服务器联通正常。" : loading ? "正在检查 OneBot WebSocket；完成前按未登录显示。" : runtimeBlocked || !running ? "目标 QQ 进程未启动或不可检测，按未登录显示。" : "OneBot WebSocket 连接失败或响应超时，按未登录显示。",
+        });
+      } else {
+        tags.push({
+          label: draft.enabled ? "服务已启动" : "服务未启动",
+          style: draft.enabled ? styles.tagOk : styles.tagReady,
+          title: draft.enabled ? "官方 QQ Bot bridge 已启用。" : "保存配置后点击“启动服务”。",
+        });
       }
-      return draft.enabled
-        ? { label: "已启用", style: styles.tagOk, title: "如果官方机器人无响应，请检查 DSH web 日志和 QQ 开放平台机器人状态。" }
-        : { label: "保存后启用", style: styles.tagReady, title: "点击“保存并启动”后会写入配置并启动 bridge。" };
+      return h("div", { style: styles.tags }, tags.map((tag) =>
+        h("span", { key: tag.label, style: tag.style, title: tag.title, "aria-label": tag.title }, tag.label),
+      ));
     }
 
     function numberField(label, value, disabled, onChange, extra = {}) {
@@ -540,7 +648,7 @@ window.__ModuleLoader__.load({
       if (status?.logState && status.logState !== "ready") return `找不到，请通过 napcat log ${qq} 查看`;
       if (status?.logState === "ready" && status.logPath) return status.logPath;
       if (draft.selfLogInput?.logPath?.trim()) return draft.selfLogInput.logPath.trim();
-      return `保存并启动后检测；找不到时请通过 napcat log ${qq} 查看`;
+      return `启动服务后生成；找不到时请通过 napcat log ${qq} 查看`;
     }
 
     async function callNapcatSetup(rpc, adminQq) {
@@ -549,6 +657,24 @@ window.__ModuleLoader__.load({
       }
       const response = await rpc.call(NAPCAT_CHANNEL, "setup", { adminQq });
       if (!response.ok) throw new Error(response.error?.message || "NapCat setup 失败");
+      return response.value;
+    }
+
+    async function callNapcatStart(rpc, adminQq) {
+      if (!rpc || typeof rpc.call !== "function") {
+        throw new Error("当前 DSH Web 没有暴露本机 NapCat setup 接口。");
+      }
+      const response = await rpc.call(NAPCAT_CHANNEL, "setup", { adminQq });
+      if (!response.ok) throw new Error(response.error?.message || "NapCat 启动失败");
+      return response.value;
+    }
+
+    async function callNapcatStatus(rpc, adminQq) {
+      if (!rpc || typeof rpc.call !== "function") {
+        throw new Error("当前 DSH Web 没有暴露本机 NapCat status 接口。");
+      }
+      const response = await rpc.call(NAPCAT_CHANNEL, "status", { adminQq });
+      if (!response.ok) throw new Error(response.error?.message || "NapCat 状态检测失败");
       return response.value;
     }
 
@@ -578,6 +704,7 @@ window.__ModuleLoader__.load({
         official: {
           appId: source.official?.appId ?? "",
           appSecret: "",
+          secretConfigured: Boolean(source.official?.appSecret),
           adminOpenId: source.official?.adminOpenId ?? "",
           allowlistOpenIdsText: Array.isArray(source.official?.allowlistOpenIds)
             ? source.official.allowlistOpenIds.join("\n")
@@ -619,13 +746,13 @@ window.__ModuleLoader__.load({
       return text;
     }
 
-    function opsFromDraft(draft, napcatStatus) {
+    function opsFromDraft(draft, napcatStatus, enabled) {
       const detectedOnebot = draft.platform === "napcat" && napcatStatus?.state === "ready" ? napcatStatus.onebot : undefined;
       const detectedLogPath = napcatLogPathForSettings(draft, napcatStatus);
       const loginQq = Number(napcatLoginQqText(draft)) || 0;
       const senderQq = draft.napcat.accountMode === "single" ? loginQq : Number(draft.access.adminQqText) || 0;
       const ops = [
-        set(["enabled"], true),
+        set(["enabled"], Boolean(enabled)),
         set(["platform"], draft.platform),
         set(["napcat", "loginQq"], loginQq),
         set(["napcat", "wsUrl"], detectedOnebot?.wsUrl ?? draft.napcat.wsUrl),
@@ -666,6 +793,34 @@ window.__ModuleLoader__.load({
       return ops;
     }
 
+    function configurationComplete(draft) {
+      return configurationError(draft) === "";
+    }
+
+    function configurationError(draft) {
+      if (!String(draft.agent.provider || "").trim()) return "请选择 Agent Provider。";
+      if (!String(draft.agent.model || "").trim()) return "请选择 Agent Model。";
+      if (!String(draft.agent.cwd || "").trim()) return "默认工作目录不能为空。";
+      if (draft.platform === "official") {
+        if (!String(draft.official.appId || "").trim()) return "AppID 不能为空。";
+        if (!draft.official.secretConfigured && !String(draft.official.appSecret || "").trim()) return "AppSecret 不能为空。";
+        if (draft.access.mode === "whitelist" && !String(draft.official.adminOpenId || "").trim()) return "Admin OpenID 不能为空。";
+        return "";
+      }
+      if (!/^\d+$/.test(napcatLoginQqText(draft).trim())) return "NapCat 登录 QQ 只允许输入数字，且不能为空。";
+      if (draft.napcat.accountMode === "dual" && !/^\d+$/.test(draft.access.adminQqText.trim())) return "发送端 QQ 只允许输入数字，且不能为空。";
+      if (!Number.isFinite(draft.napcat.selfKeepAliveIntervalSeconds) || draft.napcat.selfKeepAliveIntervalSeconds <= 0) return "保活间隔必须是大于 0 的秒数。";
+      return "";
+    }
+
+    function mutateSettings(api, snapshot, ops) {
+      return api.settings.mutate({
+        ns: NS,
+        ops,
+        ...(snapshot.revision === undefined ? {} : { expectedRevision: snapshot.revision }),
+      });
+    }
+
     function napcatLogPathForSettings(draft, napcatStatus) {
       if (draft.platform !== "napcat") return draft.selfLogInput?.logPath?.trim() || "";
       if (napcatStatus?.state === "ready") {
@@ -704,9 +859,11 @@ window.__ModuleLoader__.load({
       page: { display: "grid", gap: 16, width: "100%", maxWidth: 880, minWidth: 0, boxSizing: "border-box", color: "var(--dsw-alias-label-primary)" },
       header: { display: "grid", gap: 6, minWidth: 0, maxWidth: "100%" },
       titleRow: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", minWidth: 0, maxWidth: "100%" },
+      tags: { display: "flex", justifyContent: "flex-end", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" },
       title: { margin: 0, fontSize: 22, fontWeight: 650 },
       subtle: { margin: "6px 0 0", color: "var(--dsw-alias-label-secondary)", lineHeight: 1.5, fontSize: 13, minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere" },
       band: { border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 8, padding: 16, background: "var(--dsw-alias-bg-layer-1)", width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box", overflow: "hidden" },
+      cardActions: { display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14, minWidth: 0, maxWidth: "100%" },
       sectionTitle: { margin: "0 0 12px", fontSize: 14, fontWeight: 650 },
       stack: { display: "grid", gap: 12, minWidth: 0, maxWidth: "100%" },
       grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 12, minWidth: 0, maxWidth: "100%" },
@@ -741,6 +898,7 @@ window.__ModuleLoader__.load({
       primaryDisabled: { maxWidth: "100%", boxSizing: "border-box", border: 0, borderRadius: 6, padding: "9px 14px", color: "var(--dsw-alias-label-secondary)", background: "var(--dsw-alias-bg-layer-2)", font: "inherit", overflowWrap: "anywhere" },
       secondary: { maxWidth: "100%", boxSizing: "border-box", borderRadius: 6, border: "1px solid var(--dsw-alias-border-l1)", padding: "8px 12px", color: "var(--dsw-alias-label-primary)", background: "var(--dsw-alias-bg-base)", font: "inherit", fontSize: 13, cursor: "pointer", overflowWrap: "anywhere", whiteSpace: "normal", textAlign: "left" },
       ok: { margin: 0, color: "var(--dsw-alias-state-success-primary)", fontSize: 14, display: "grid", gap: 5, minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere" },
+      successInfo: { flexBasis: "100%", margin: 0, padding: 14, borderRadius: 8, border: "1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 42%, transparent)", background: "color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent)", color: "var(--dsw-alias-state-success-primary)", fontSize: 14, display: "grid", gap: 5, minWidth: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflowWrap: "anywhere" },
       error: { margin: 0, color: "var(--dsw-alias-state-error-primary)", fontSize: 14, display: "grid", gap: 5, minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere" },
     };
     return module.exports;

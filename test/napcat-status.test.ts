@@ -6,6 +6,14 @@ import { join } from 'node:path'
 import { inspectNapcatSettings, setupNapcatForSettings } from '../src/napcat-status.js'
 
 describe('NapCat settings status probe', () => {
+  it('defines login status as OneBot server connectivity rather than a self-message action', async () => {
+    const source = await readFile(join(process.cwd(), 'src', 'napcat-status.ts'), 'utf8')
+
+    expect(source).toContain("ws.once('open', () => finish('logged-in'))")
+    expect(source).toContain("setTimeout(() => finish('not-logged-in'), 2500)")
+    expect(source).not.toContain("action: 'send_private_msg'")
+  })
+
   it('reports install guidance when napcat cli is absent', async () => {
     const status = await inspectNapcatSettings({
       spawn: fakeSpawn({ missing: true }),
@@ -56,12 +64,40 @@ describe('NapCat settings status probe', () => {
       adminQq: '10001',
       rootPath: root,
       spawn: fakeSpawn({ statusOutput: 'running online' }),
+      serverConnectivityProbe: async () => 'logged-in',
     })
 
     expect(status.state).toBe('ready')
     expect(status.onebot?.wsUrl).toBe('ws://127.0.0.1:3301')
     expect(status.onebot?.token).toBe('abcdef123456')
     expect(status.onebot?.tokenPreview).toBe('abcd...3456')
+    expect(status.login).toBe('logged-in')
+  })
+
+  it('refreshes login health through a server-connectivity probe for the configured QQ', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-login-refresh-'))
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'onebot11_10001.json'), JSON.stringify({
+      network: {
+        websocketServers: [{ enable: true, host: '127.0.0.1', port: 3001, token: 'secret' }],
+      },
+    }), 'utf8')
+    let probedQq = 0
+
+    const status = await inspectNapcatSettings({
+      adminQq: '10001',
+      rootPath: root,
+      spawn: fakeSpawn({ statusOutput: 'running' }),
+      serverConnectivityProbe: async (_onebot, expectedQq) => {
+        probedQq = expectedQq
+        return 'not-logged-in'
+      },
+    })
+
+    expect(probedQq).toBe(10001)
+    expect(status.runtime).toBe('running')
+    expect(status.login).toBe('not-logged-in')
   })
 
   it('sets up OneBot config when saving settings without checking login', async () => {
@@ -144,13 +180,13 @@ describe('NapCat settings status probe', () => {
     const written = JSON.parse(await readFile(configPath, 'utf8'))
     const server = written.network.websocketServers[0]
 
-    expect(stopArgs).toEqual([''])
+    expect(stopArgs).toEqual(['554616801'])
     expect(started).toBe(true)
     expect(restarted).toBe(true)
     expect(status.state).toBe('ready')
-    expect(status.napcatStoppedQqs).toBeUndefined()
+    expect(status.napcatStoppedQqs).toEqual([554616801])
     expect(status.napcatStarted).toBe(true)
-    expect(status.message).toContain('已执行 napcat stop 并执行 napcat start 10001')
+    expect(status.message).toContain('已执行 napcat stop 554616801，并执行 napcat start 10001')
     expect(server.enable).toBe(true)
     expect(server.host).toBe('127.0.0.1')
     expect(server.port).toBe(3001)
@@ -193,8 +229,8 @@ describe('NapCat settings status probe', () => {
     })
 
     expect(startCount).toBe(2)
-    expect(stopArgs).toEqual(['', ''])
-    expect(status.napcatStoppedQqs).toBeUndefined()
+    expect(stopArgs).toEqual(['554616801'])
+    expect(status.napcatStoppedQqs).toEqual([554616801])
     expect(status.napcatStarted).toBe(true)
   })
 
@@ -231,8 +267,32 @@ describe('NapCat settings status probe', () => {
     })
 
     expect(startCount).toBe(2)
-    expect(stopArgs).toEqual(['', ''])
+    expect(stopArgs).toEqual([''])
     expect(status.napcatStarted).toBe(true)
+  })
+
+  it('restarts the target QQ when that same NapCat service is already running', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-restart-current-'))
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'onebot11_10001.json'), JSON.stringify({
+      network: { websocketServers: [{ enable: true, host: '127.0.0.1', port: 3001, token: 'secret' }] },
+    }), 'utf8')
+    let restartCount = 0
+
+    const status = await setupNapcatForSettings({
+      adminQq: '10001',
+      rootPath: root,
+      spawn: fakeSpawn({
+        statusOutput: '检测到 1 个正在运行的 Napcat 实例:\n- 运行中: QQ 10001 (PID: 2048)\n二维码等待扫码',
+        onRestart: () => { restartCount += 1 },
+      }),
+    })
+
+    expect(restartCount).toBe(1)
+    expect(status.napcatStarted).toBe(false)
+    expect(status.napcatRestarted).toBe(true)
+    expect(status.login).toBe('not-logged-in')
   })
 
   it('reports a friendly message when the QQ onebot config file is missing', async () => {

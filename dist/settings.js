@@ -214,7 +214,6 @@ export async function cleanupLegacyProfileInsert(dshHome = resolveDshHome()) {
         return false;
     const backupPath = join(dshHome, 'profiles', 'web', 'cordis.patch.yml.dsh-qq-bridge.bak');
     await writeProfilePatchWithBackup(profilePath, update.content, backupPath);
-    console.info(`[dsh-qq-bridge] removed legacy profile insert from ${profilePath}; backup: ${backupPath}`);
     return true;
 }
 function resolveDshHome() {

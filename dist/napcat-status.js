@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { WebSocket } from 'ws';
 import { classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, extractRunningNapcatQqs, tryReadOnebotServer, updateOnebotConfigFile, } from './cli/napcat.js';
 import { napcatCliInstallGuide } from './cli/setup.js';
 const DEFAULT_ONEBOT_WS_URL = 'ws://127.0.0.1:3001';
@@ -18,13 +19,17 @@ export async function inspectNapcatSettings(options = {}) {
     const commands = napcatCommands(adminQq);
     const onebotConfigPath = defaultOnebotConfigPath(adminQq, rootPath);
     const onebot = await tryReadOnebotServer(onebotConfigPath);
+    const probedLogin = onebot === null
+        ? 'not-logged-in'
+        : await (options.serverConnectivityProbe ?? probeOnebotServerConnectivity)(onebot, adminQq);
+    const login = settingsLoginState(probedLogin);
     return {
         state: 'ready',
         installed: true,
         adminQq,
         runtime: status.runtime,
         runningQqs: status.runningQqs,
-        login: status.login,
+        login,
         logState: status.logState,
         rootPath,
         logPath: defaultNapcatLogPath(adminQq, rootPath),
@@ -37,6 +42,40 @@ export async function inspectNapcatSettings(options = {}) {
         statusOutput: status.output,
     };
 }
+function probeOnebotServerConnectivity(onebot, _expectedQq) {
+    return new Promise((resolve) => {
+        let settled = false;
+        let ws;
+        const finish = (state) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+                ws?.close();
+            }
+            catch { /* noop */ }
+            resolve(state);
+        };
+        const timer = setTimeout(() => finish('not-logged-in'), 2500);
+        try {
+            const token = onebot.token.trim();
+            ws = new WebSocket(`ws://${onebot.host}:${onebot.port}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+        }
+        catch {
+            finish('not-logged-in');
+            return;
+        }
+        // 设置页的“登录状态”表示 OneBot 服务联通状态。握手成功说明端点已启动、
+        // token 已通过校验且服务器可达；无需额外发送一条 QQ 自发消息。
+        ws.once('open', () => finish('logged-in'));
+        ws.once('error', () => finish('not-logged-in'));
+        ws.once('close', () => finish('not-logged-in'));
+        ws.once('unexpected-response', () => finish('not-logged-in'));
+    });
+}
 export async function setupNapcatForSettings(options = {}) {
     const spawn = options.spawn ?? spawnSync;
     const rootPath = typeof options.rootPath === 'string' && options.rootPath.trim()
@@ -45,38 +84,46 @@ export async function setupNapcatForSettings(options = {}) {
     const adminQq = normalizeAdminQq(options.adminQq);
     const onebotConfigPath = adminQq === undefined ? undefined : defaultOnebotConfigPath(adminQq, rootPath);
     const base = inspectNapcatRuntimeForSettings(options);
-    if (base !== undefined) {
-        if (base.state === 'not-installed')
-            throw new Error(`${base.message}\n${base.commands.join('\n')}`);
-        if (base.state === 'needs-admin')
-            throw new Error(base.message);
-        if (base.state === 'not-running') {
-            if (adminQq === undefined || onebotConfigPath === undefined)
-                throw new Error('请输入 NapCat 登录 QQ。');
-            stopNapcatBeforeStart(adminQq, spawn);
-            let start = startNapcat(adminQq, spawn);
-            if (!start.ok && isNapcatMultiInstanceBlock(start.output)) {
-                stopNapcatBeforeStart(adminQq, spawn);
-                start = startNapcat(adminQq, spawn);
-            }
-            if (!start.ok) {
-                throw new Error(`NapCat 未启动，且执行 napcat start ${adminQq} 失败: ${start.output || 'unknown error'}\n${base.commands.join('\n')}`);
-            }
-            const configReady = await waitForOnebotConfigFile(onebotConfigPath, {
-                timeoutMs: options.onebotConfigWaitMs,
-                retryIntervalMs: options.onebotConfigRetryIntervalMs,
-            });
-            if (!configReady) {
-                throw new Error(missingOnebotConfigMessage(adminQq, true, rootPath));
-            }
-        }
-        else {
-            return base;
-        }
-    }
+    if (base?.state === 'not-installed')
+        throw new Error(`${base.message}\n${base.commands.join('\n')}`);
+    if (base?.state === 'needs-admin')
+        throw new Error(base.message);
     if (adminQq === undefined)
         throw new Error('请输入 NapCat 登录 QQ。');
     const status = inspectNapcat(adminQq, rootPath, spawn);
+    const targetWasRunning = status.runtime === 'running';
+    const stoppedQqs = [];
+    let started = false;
+    if (!targetWasRunning) {
+        for (const runningQq of status.runningQqs.filter((qq) => qq !== adminQq)) {
+            stopNapcatQqBeforeStart(runningQq, adminQq, spawn);
+            stoppedQqs.push(runningQq);
+        }
+        let start = startNapcat(adminQq, spawn);
+        if (!start.ok && isNapcatMultiInstanceBlock(start.output)) {
+            const blockingQqs = parseRunningQqs(start.output).filter((qq) => qq !== adminQq && !stoppedQqs.includes(qq));
+            if (blockingQqs.length > 0) {
+                for (const runningQq of blockingQqs) {
+                    stopNapcatQqBeforeStart(runningQq, adminQq, spawn);
+                    stoppedQqs.push(runningQq);
+                }
+            }
+            else {
+                stopNapcatBeforeStart(adminQq, spawn);
+            }
+            start = startNapcat(adminQq, spawn);
+        }
+        if (!start.ok) {
+            throw new Error(`NapCat 未启动，且执行 napcat start ${adminQq} 失败: ${start.output || 'unknown error'}\n${napcatCommands(adminQq).join('\n')}`);
+        }
+        started = true;
+        if (onebotConfigPath === undefined || !await waitForOnebotConfigFile(onebotConfigPath, {
+            timeoutMs: options.onebotConfigWaitMs,
+            retryIntervalMs: options.onebotConfigRetryIntervalMs,
+        })) {
+            throw new Error(missingOnebotConfigMessage(adminQq, true, rootPath));
+        }
+    }
     const configPath = onebotConfigPath ?? defaultOnebotConfigPath(adminQq, rootPath);
     if (!existsSync(configPath)) {
         throw new Error(missingOnebotConfigMessage(adminQq, base?.state === 'not-running', rootPath));
@@ -88,11 +135,12 @@ export async function setupNapcatForSettings(options = {}) {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(`无法写入 OneBot 配置 ${configPath}: ${message}`);
     });
-    const restart = update.changed ? restartNapcat(adminQq, spawn) : { ok: true, output: '' };
+    const shouldRestart = targetWasRunning || update.changed;
+    const restart = shouldRestart ? restartNapcat(adminQq, spawn) : { ok: true, output: '' };
     if (!restart.ok) {
-        throw new Error(`OneBot 配置已写入，但执行 napcat restart ${adminQq} 失败: ${restart.output || 'unknown error'}`);
+        throw new Error(`OneBot 配置已写入，但重启 NapCat ${adminQq} 失败: ${restart.output || 'unknown error'}`);
     }
-    const nextStatus = update.changed ? inspectNapcat(adminQq, rootPath, spawn) : status;
+    const nextStatus = started || shouldRestart ? inspectNapcat(adminQq, rootPath, spawn) : status;
     const commands = napcatCommands(adminQq);
     return {
         state: 'ready',
@@ -100,18 +148,18 @@ export async function setupNapcatForSettings(options = {}) {
         adminQq,
         runtime: nextStatus.runtime,
         runningQqs: nextStatus.runningQqs,
-        login: nextStatus.login,
+        login: settingsLoginState(nextStatus.login),
         logState: nextStatus.logState,
         rootPath,
         logPath: defaultNapcatLogPath(adminQq, rootPath),
         onebotConfigPath: configPath,
         onebot: onebotStatus(update.server),
         onebotChanged: update.changed,
-        napcatStoppedQqs: undefined,
-        napcatStarted: base?.state === 'not-running',
-        napcatRestarted: update.changed,
+        napcatStoppedQqs: stoppedQqs.length > 0 ? stoppedQqs : undefined,
+        napcatStarted: started,
+        napcatRestarted: shouldRestart,
         commands,
-        message: `已完成 NapCat/OneBot 配置。${base?.state === 'not-running' ? `已执行 napcat stop 并执行 napcat start ${adminQq}。` : ''}${update.changed ? `已执行 napcat restart ${adminQq} 让 OneBot 配置生效。` : ''}\n${napcatLogReviewMessage(adminQq, rootPath, 'ensure')}`,
+        message: `已完成 NapCat/OneBot 配置。${stoppedQqs.length > 0 ? `已执行 ${stoppedQqs.map((qq) => `napcat stop ${qq}`).join('、')}，并执行 napcat start ${adminQq}。` : started ? `已执行 napcat start ${adminQq}。` : ''}${shouldRestart ? `已执行 napcat restart ${adminQq}${targetWasRunning ? '。' : ' 让 OneBot 配置生效。'}` : ''}\n${napcatLogReviewMessage(adminQq, rootPath, 'ensure')}`,
         statusOutput: nextStatus.output,
         restartOutput: restart.output,
     };
@@ -149,12 +197,12 @@ function inspectNapcatRuntimeForSettings(options) {
             adminQq,
             runtime: status.runtime,
             runningQqs: status.runningQqs,
-            login: status.login,
+            login: settingsLoginState(status.login),
             logState: status.logState,
             rootPath,
             logPath: defaultNapcatLogPath(adminQq, rootPath),
             commands,
-            message: `NapCat 未启动。请在终端执行 napcat start ${adminQq}，启动后回到这里保存配置。`,
+            message: `NapCat 未启动。请点击“启动 NapCat”，插件将执行 napcat start ${adminQq}。`,
             statusOutput: status.output,
         };
     }
@@ -209,6 +257,17 @@ function stopNapcatAll(spawn) {
         ok: result.status === 0,
         output,
     };
+}
+function stopNapcatQq(qq, spawn) {
+    const result = spawn('napcat', ['stop', String(qq)], { encoding: 'utf8', timeout: 15000 });
+    const output = cleanNapcatCommandOutput([result.stdout, result.stderr].filter(Boolean).join('\n'));
+    return { ok: result.status === 0, output };
+}
+function stopNapcatQqBeforeStart(runningQq, targetQq, spawn) {
+    const stop = stopNapcatQq(runningQq, spawn);
+    if (stop.ok || isBenignNapcatStopFailure(stop.output))
+        return;
+    throw new Error(`切换到 QQ ${targetQq} 前执行 napcat stop ${runningQq} 失败: ${stop.output || 'unknown error'}`);
 }
 function stopNapcatBeforeStart(qq, spawn) {
     const stop = stopNapcatAll(spawn);
@@ -300,4 +359,7 @@ function isBenignNapcatStopFailure(output) {
         || text.includes('没有运行')
         || text.includes('未运行')
         || text.includes('已停止');
+}
+function settingsLoginState(state) {
+    return state === 'logged-in' ? 'logged-in' : 'not-logged-in';
 }

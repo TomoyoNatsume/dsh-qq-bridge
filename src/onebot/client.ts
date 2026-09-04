@@ -61,8 +61,8 @@ export class WsTransport implements Transport {
       ws = new WebSocket(this.url, {
         headers: this.authToken ? { Authorization: `Bearer ${this.authToken}` } : undefined,
       })
-    } catch (err) {
-      this.handleError('ws-new-failed', err)
+    } catch {
+      this.handleError()
       return
     }
     this.ws = ws
@@ -83,9 +83,8 @@ export class WsTransport implements Transport {
         // 忽略非 JSON 帧
       }
     })
-    ws.on('error', (err) => this.handleError('ws-error', err))
+    ws.on('error', () => this.handleError())
     ws.on('close', () => {
-      console.warn(`[dsh-qq-bridge] onebot ws closed: ${this.url}`)
       this.handleClose()
     })
   }
@@ -98,8 +97,7 @@ export class WsTransport implements Transport {
     fn?.(ok)
   }
 
-  private handleError(reason: string, err: unknown): void {
-    console.warn(`[dsh-qq-bridge] onebot ${reason}: ${err instanceof Error ? err.message : String(err)}`)
+  private handleError(): void {
     if (this.initialSettled === false) this.resolveInitial(false) // 首次连接失败 -> reject
     this.scheduleRetry()
   }

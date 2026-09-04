@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { type NapcatLogPathState, type NapcatLoginState, type NapcatRuntimeState } from './cli/napcat.js';
+import { type OneBotServerSummary, type NapcatLogPathState, type NapcatLoginState, type NapcatRuntimeState } from './cli/napcat.js';
 export type NapcatSettingsStatusState = 'not-installed' | 'needs-admin' | 'not-running' | 'ready';
 export interface NapcatSettingsStatus {
     state: NapcatSettingsStatusState;
@@ -33,6 +33,7 @@ export interface InspectNapcatSettingsOptions {
     spawn?: typeof spawnSync;
     onebotConfigWaitMs?: number;
     onebotConfigRetryIntervalMs?: number;
+    serverConnectivityProbe?: (onebot: OneBotServerSummary, expectedQq: number) => Promise<NapcatLoginState>;
 }
 export declare function inspectNapcatSettings(options?: InspectNapcatSettingsOptions): Promise<NapcatSettingsStatus>;
 export declare function setupNapcatForSettings(options?: InspectNapcatSettingsOptions): Promise<NapcatSettingsStatus>;

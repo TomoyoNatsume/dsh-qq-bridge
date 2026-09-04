@@ -26,6 +26,7 @@ import { isNapcatSelfKeepAliveMessage, startNapcatSelfKeepAlive } from './onebot
 export const name = 'dsh-qq-bridge';
 export const inject = ['agentLoop', 'agentPresets', 'sessionQuery'];
 export async function apply(ctx, options) {
+    console.info('请到Web UI的设置中配置<QQ bridge>');
     const entry = DshQqBridgeConfig.parse(options);
     const runtime = createBridgeRuntime(ctx);
     const settings = await installQqBridgeSettings(ctx, entry, (next) => runtime.reconcile(next));
@@ -51,9 +52,6 @@ function createBridgeRuntime(ctx) {
                     activeKey = '';
                     await previous();
                 }
-                else if (activeKey === '') {
-                    console.info('[dsh-qq-bridge] QQ bridge is not enabled or is missing required settings; configure it from DSH Web settings.');
-                }
                 return;
             }
             if (stop && activeKey === nextKey)
@@ -72,7 +70,6 @@ function createBridgeRuntime(ctx) {
                 }
                 stop = nextStop;
                 activeKey = nextKey;
-                console.info('[dsh-qq-bridge] QQ bridge started from saved settings.');
             }
             catch (err) {
                 activeKey = '';
@@ -103,9 +100,6 @@ async function startQqBridge(ctx, cfg) {
     });
     const client = createBridgeClient(cfg);
     const notifyAgentReply = agentReplyNotificationsEnabled(cfg);
-    if (officialMode && cfg.notifications.agentReply.enabled === undefined) {
-        console.info('[dsh-qq-bridge] official QQ agent reply notifications are disabled by default; set notifications.agentReply.enabled=true to use wakeup messages');
-    }
     const replyNotifier = notifyAgentReply
         ? createAgentReplyNotifier(ctx, client, adminTarget)
         : () => { };
@@ -169,7 +163,8 @@ async function startQqBridge(ctx, cfg) {
         ],
         controlDispatcher,
     }));
-    // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载:先登录警告,
+    // 连接健康检查失败不应拖垮整个 DSH Host 的插件挂载。
+    // NapCat 模式保持静默并在后台自动重连；官方模式仍输出连接引导。
     // 依旧保持插件挂载(WS 端点在时才真正收发),避免瞬时断连导致整棵 tree 回滚。
     const unsubMessages = client.onMessage((evt) => {
         if (!officialMode && isNapcatSelfKeepAliveMessage(evt.raw_message, cfg.napcat.selfKeepAlive.message))
@@ -177,7 +172,8 @@ async function startQqBridge(ctx, cfg) {
         void router.route(evt);
     });
     client.connect().catch((err) => {
-        console.warn('[dsh-qq-bridge] ' + (officialMode ? buildOfficialConnectGuidance(cfg, err) : buildConnectGuidance(cfg, err)));
+        if (officialMode)
+            console.warn(buildOfficialConnectGuidance(cfg, err));
     });
     const stopSelfKeepAlive = officialMode
         ? () => { }
