@@ -1,6 +1,6 @@
 {
   "name": "@yachangchang/dsh-qq-bridge",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A pluggable DSH host plugin that connects QQ (NapCat/OneBot) and forwards messages to DSH agents / local capabilities.",
   "license": "MIT",
   "type": "module",
