@@ -167,7 +167,7 @@ window.__ModuleLoader__.load({
             setDirty(false);
             setGeneralDirty(false);
             setDraft((prev) => cleanSavedDraft(prev, enabled));
-            setMessage(draft.platform === "official" ? "配置已保存，QQ bridge 已启用。连接状态请在官方平台确认。" : "配置已自动保存。登录配置可点击“启动Napcat”应用。");
+            setMessage(draft.platform === "official" ? "配置已保存，QQ bridge 已启用。连接状态请在官方平台确认。" : "配置已自动保存。登录配置可点击“启动/重启Napcat”应用。");
           }
         } catch (error) {
           setMessage(error instanceof Error ? error.message : String(error));
@@ -191,6 +191,11 @@ window.__ModuleLoader__.load({
           setPendingAction("");
         }
       };
+
+      React.useEffect(() => {
+        if (draft.platform !== "napcat") return;
+        void refreshNapcatStatus();
+      }, []);
 
       const startNapcat = async () => {
         setPendingAction("start-napcat");
@@ -326,7 +331,7 @@ window.__ModuleLoader__.load({
                   style: startNapcatDisabled ? styles.primaryDisabled : styles.primary,
                   disabled: startNapcatDisabled,
                   onClick: startNapcat,
-                }, pendingAction === "start-napcat" ? "启动中..." : "启动Napcat"),
+                }, pendingAction === "start-napcat" ? "启动中..." : "启动/重启Napcat"),
               )
             : null,
         ) : h("section", { style: styles.band },
@@ -448,7 +453,7 @@ window.__ModuleLoader__.load({
         h("ol", { style: styles.guideList },
           h("li", null, "确认环境是 Linux 或 WSL2，并确保本机能使用 node、npm、pnpm。"),
           h("li", null, "安装 NapCat CLI 后运行 napcat help，确认系统里已经有 napcat 命令。"),
-          h("li", null, "只需要安装 NapCat CLI，不需要自己先启动 QQ 后台；填写 NapCat 登录 QQ 后，点击“启动Napcat”，插件会直接执行 napcat start。已有其他 QQ 运行时会先 stop 旧 QQ。"),
+          h("li", null, "只需要安装 NapCat CLI，不需要自己先启动 QQ 后台；填写 NapCat 登录 QQ 后，点击“启动/重启Napcat”，插件会直接执行 napcat start。已有其他 QQ 运行时会先 stop 旧 QQ。"),
           h("li", null, "NapCat 首次启动并生成配置文件后，插件会写入 OneBot 正向 WebSocket 配置。"),
           h("li", null, "扫码登录时打开最后生成的二维码；如果发送 ping 没反应，用日志命令确认是否已经登录。"),
         ),

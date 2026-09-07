@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 
-async function page(overrides: Record<string, unknown> = {}, rejectSave = false, buttonLabel = '启动Napcat') {
+async function page(overrides: Record<string, unknown> = {}, rejectSave = false, buttonLabel = '启动/重启Napcat') {
   const source = (await readFile('src/client.js', 'utf8')).replace('exports.inject =',
     'exports.testHelpers = { QqBridgeSettingsSection, configurationError, draftFrom, generalOpsFromDraft, generalConfigurationError, platformOpsFromDraft, detectNapcatTags }; exports.inject =')
   const states: unknown[] = []
