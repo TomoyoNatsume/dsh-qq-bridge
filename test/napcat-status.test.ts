@@ -295,6 +295,22 @@ describe('NapCat settings status probe', () => {
     expect(status.login).toBe('not-logged-in')
   })
 
+  it('restarts an existing background QQ even when targeted status says stopped', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'napcat-background-'))
+    const configDir = join(root, 'opt', 'QQ', 'resources', 'app', 'app_launcher', 'napcat', 'config')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'onebot11_10001.json'), JSON.stringify({ network: { websocketServers: [{ enable: true, host: '127.0.0.1', port: 3001, token: 'secret' }] } }))
+    const actions: string[] = []
+    const status = await setupNapcatForSettings({ adminQq: '10001', rootPath: root,
+      spawn: ((command: string, args: string[]) => {
+        if (args[0] === 'start' || args[0] === 'restart') actions.push(args[0])
+        return { status: 0, stdout: args[0] === 'status' ? (args.length === 1 ? '运行中: QQ 10001 (PID: 2048)' : 'not running') : 'ok', stderr: '' }
+      }) as any,
+    })
+    expect(actions).toEqual(['restart'])
+    expect(status.napcatStarted).toBe(false)
+  })
+
   it('reports a friendly message when the QQ onebot config file is missing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-qq-bridge-napcat-missing-config-'))
     await mkdir(join(root, 'log'), { recursive: true })

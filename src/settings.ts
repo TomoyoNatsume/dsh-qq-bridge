@@ -1,3 +1,4 @@
+import { inspectNapcatTag } from './napcat-tags.js'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -5,6 +6,7 @@ import { DshQqBridgeConfig } from './config.js'
 import { removeInsertItem, writeProfilePatchWithBackup } from './cli/dsh-profile.js'
 import { installQqBridgePreset } from './cli/qq-preset.js'
 import { inspectNapcatSettings, setupNapcatForSettings } from './napcat-status.js'
+import { getNapcatRecoveryStatus } from './napcat-recovery.js'
 
 export const QQ_BRIDGE_SETTINGS_NAMESPACE = 'dsh-qq-bridge'
 export const QQ_BRIDGE_NAPCAT_RPC_CHANNEL = '/dsh-qq-bridge-napcat'
@@ -138,8 +140,20 @@ function registerNapcatStatusRpc(connection: RpcConnection): (() => void) | unde
 function createNapcatStatusHandler(): (endpoint: string, payload: unknown) => Promise<unknown> {
   return async (endpoint, payload) => {
     try {
-      if (endpoint === 'status') return success(await inspectNapcatSettings(object(payload)))
-      if (endpoint === 'setup') return success(await setupNapcatForSettings(object(payload)))
+      if (endpoint === 'recovery') return success(getNapcatRecoveryStatus(Number(object(payload).adminQq)) ?? null)
+      if (endpoint === 'tag') return success(await inspectNapcatTag(String(object(payload).stage), object(payload)))
+      if (endpoint === 'status') {
+        const status = await inspectNapcatSettings(object(payload))
+        const recovery = getNapcatRecoveryStatus(Number(object(payload).adminQq))
+        if (recovery && recovery.state !== 'watching') {
+          status.login = recovery.state === 'online' && status.runtime === 'running' && status.login === 'logged-in'
+            ? 'logged-in' : 'not-logged-in'
+        }
+        return success({ ...status, recovery })
+      }
+      if (endpoint === 'setup') {
+        return success(await setupNapcatForSettings(object(payload)))
+      }
       if (endpoint === 'host-info') return success({ homeDir: homedir() })
       return badRequest(`unknown NapCat endpoint: ${endpoint}`)
     } catch (err) {
@@ -188,14 +202,11 @@ async function buildQqBridgeSettingsSchema(): Promise<unknown | undefined> {
     platform: z.union(['napcat', 'official']).default('napcat'),
     napcat: z.object({
       loginQq: z.number().step?.(1).default(0) ?? z.number().default(0),
+      autoRestart: z.boolean().default(true),
       wsUrl: z.string().default('ws://127.0.0.1:3001'),
       token: secret(z.string().default('')),
       guideDoc: z.string().default('docs/agent-napcat-guide.md'),
-      selfKeepAlive: z.object({
-        enabled: z.boolean().default(true),
-        intervalSeconds: z.number().step?.(1).min?.(1).default(600) ?? z.number().default(600),
-        message: z.string().default('[dsh-qq-bridge] keepalive'),
-      }),
+
     }),
     official: z.object({
       appId: z.string().default(''),

@@ -7,24 +7,11 @@ const DshQqBridgeConfig = z.object({
     napcat: z.object({
         /** NapCat 登录端 QQ；双号模式下与发送端 QQ 不同，仅用于 Web 设置页检测本机 NapCat。 */
         loginQq: z.number().int().nonnegative().default(0),
+        autoRestart: z.boolean().default(true),
         wsUrl: z.string().url().default('ws://127.0.0.1:3001'),
         token: z.string().optional(),
         /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
         guideDoc: z.string().optional().default('docs/agent-napcat-guide.md'),
-        /** 定时让 NapCat 登录号给自己发私聊，降低长期无活动时被服务端回收的概率。 */
-        selfKeepAlive: z.preprocess((value) => {
-            if (typeof value !== 'object' || value === null || Array.isArray(value))
-                return value;
-            const legacy = value;
-            if (legacy.intervalSeconds !== undefined || typeof legacy.intervalMs !== 'number')
-                return value;
-            return { ...legacy, intervalSeconds: legacy.intervalMs / 1000 };
-        }, z.object({
-            enabled: z.boolean().default(true),
-            /** 保活发送间隔，单位为秒。 */
-            intervalSeconds: z.number().positive().default(600),
-            message: z.string().min(1).default('[dsh-qq-bridge] keepalive'),
-        })).default({}),
     }).default({}),
     official: z
         .object({

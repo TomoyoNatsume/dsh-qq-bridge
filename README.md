@@ -103,7 +103,7 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
    插件会作为 DSH bundle 写入 `dsh.profile.bundles`。刚安装时默认 `enabled: false`，不会连接 QQ，也不会启动 bridge。
 
-2. 启动 `dsh web`，进入 Web UI，打开左下角“设置”，进入 `QQ bridge`，填写 QQ 接入、管理员、Agent 模型等配置，点击“保存配置”。（NapCat 分支会检测本机是否安装并启动 NapCat，点击“保存配置”时会自动写入 OneBot 正向 WebSocket 配置和 token）
+2. 启动 `dsh web`，进入左下角“设置” → `QQ bridge`。两种模式均先显示“通用配置”卡片，其中的模型、工作目录、访问模式等修改自动保存；卡片后切换接入方式，再显示 NapCat 或官方 QQ Bot 配置卡片。平台卡片不自动保存：NapCat 点击“启动Napcat”，官方 QQ Bot 点击“保存并启动”，校验后提交并启用。NapCat 保留“刷新状态”。NapCat 状态仅在手动点击“刷新状态”时检测，不自动刷新；卡片标题旁依次异步检测安装、启动、登录三个状态，并显示“正在检测”：安装通过 PATH 查找 napcat 指令，启动通过 napcat status 中的运行 QQ 判断，登录通过给运行 QQ 自发消息并回读验证；官方模式不显示状态 tag。
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/TomoyoNatsume/dsh-qq-bridge/main/docs/asset/config.png" alt="插件配置界面" width="760">
@@ -119,7 +119,11 @@ QQ 发送消息 -> NapCat / OneBot -> dsh-qq-bridge -> DSH Agent -> QQ 回复
 
 ### NapCat 安装
 
-选择 NapCat 路径前，本机需要有 `napcat` 命令。Linux / WSL2 推荐：
+选择 NapCat 路径前，本机需要有 `napcat` 命令。
+
+#### 默认：安装当前最新版
+
+Linux / WSL2 推荐先使用 NapCat 官方 Rootless 安装器：
 
 ```bash
 cd ~
@@ -133,9 +137,95 @@ bash napcat.sh --docker n --cli y
 napcat help
 ```
 
-只需要安装 NapCat CLI，不需要自己先启动 QQ 后台。设置页填写 NapCat 登录 QQ 后点击“保存并启动”，目标 QQ 未运行时插件会先执行 `napcat stop` 顶掉现有 NapCat 实例，再按这个 QQ 号执行 `napcat start <QQ>`。首次使用时请打开 `~/Napcat/log/napcat_<你的QQ号>.log` 或执行 `napcat log <你的QQ号>` 查看日志并扫码登陆；NapCat 生成 OneBot 配置文件后，插件会继续写入正向 WebSocket 配置。
+只需要安装 NapCat CLI，不需要自己先启动 QQ 后台。设置页填写 NapCat 登录 QQ 后点击“启动Napcat”，目标 QQ 未运行时插件会先执行 `napcat stop` 顶掉现有 NapCat 实例，再按这个 QQ 号执行 `napcat start <QQ>`。首次使用时请打开 `~/Napcat/log/napcat_<你的QQ号>.log` 或执行 `napcat log <你的QQ号>` 查看日志并扫码登陆；NapCat 生成 OneBot 配置文件后，插件会继续写入正向 WebSocket 配置。
 
 > NapCat 扫码登录时请打开 setup 打印的日志。日志里可能有多个二维码，请拉到最后一个二维码扫码；如果二维码过期，在 setup 里选择“二维码过期”，它会重启 NapCat 生成新的登录请求。
+
+#### 遇到“强制下线”：固定版本修复方案
+
+这不是默认安装方式。只有在正常安装后频繁出现 `[KickedOffLine]`、扫码后仍很快被强制下线时，再尝试下面的已验证组合：
+
+- QQ `3.2.21-42086`
+- NapCat `4.15.19`
+- 全新 QQ profile（不复用旧的 `~/.config/QQ`）
+- Rootless NapCat 目录 `~/Napcat`
+
+腾讯原 CDN 已删除 QQ `3.2.21-42086` 的独立 DEB/RPM。下面从 NapCat `v4.15.19` 的固定 Docker 镜像中取出同版本 QQ 和 NapCat，然后放到宿主机 `~/Napcat` 运行。Docker 只是版本文件来源，修复后的 QQ/NapCat 不在容器中运行。
+
+> 该操作会让 QQ 退出登录，需要重新扫码。旧目录会移入带时间戳的备份目录，不会直接删除。下面步骤已在 Linux x86_64 验证。
+
+1. 确保已完成上面的普通 NapCat 安装，然后安装 Docker 并确认命令可用。Ubuntu / Debian 可以执行：
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y docker.io
+   docker info
+   ```
+
+   WSL2 也可以使用 Docker Desktop。如果 `docker info` 提示权限不足，请先按当前 Docker 安装方式配置好当前用户权限，再继续。
+
+2. 停止已有实例，并备份旧的 QQ profile 和 NapCat 目录：
+
+   ```bash
+   if command -v napcat >/dev/null 2>&1; then napcat stop; fi
+
+   napcat_backup="$HOME/dsh-qq-bridge-backup/$(date +%Y%m%d-%H%M%S)"
+   mkdir -p "$napcat_backup"
+   if [ -d "$HOME/.config/QQ" ]; then mv "$HOME/.config/QQ" "$napcat_backup/QQ"; fi
+   if [ -d "$HOME/Napcat" ]; then mv "$HOME/Napcat" "$napcat_backup/Napcat"; fi
+   echo "旧文件已备份到：$napcat_backup"
+   ```
+
+3. 按不可变镜像摘要获取固定版本，提取 QQ 和 NapCat：
+
+   ```bash
+   napcat_image="mlikiowa/napcat-docker@sha256:77c9fa8d8ae05b6a15251e3f0121392b466828444877b276b57aca0e9ff776e0"
+   napcat_work="$(mktemp -d)"
+
+   docker pull "$napcat_image"
+   napcat_container="$(docker create "$napcat_image")"
+   docker cp "${napcat_container}:/opt/QQ" "$napcat_work/QQ"
+   docker cp "${napcat_container}:/app/NapCat.Shell.zip" "$napcat_work/NapCat.Shell.zip"
+   docker rm "$napcat_container"
+
+   echo "700163fc159ef1a96932720152bc5b44eed5b76bdcee7282f98365fb5e82fdd4  $napcat_work/NapCat.Shell.zip" \
+     | sha256sum -c -
+
+   mkdir -p "$HOME/Napcat/opt"
+   cp -a "$napcat_work/QQ" "$HOME/Napcat/opt/QQ"
+   mkdir -p "$HOME/Napcat/opt/QQ/resources/app/app_launcher/napcat"
+   unzip -q "$napcat_work/NapCat.Shell.zip" \
+     -d "$HOME/Napcat/opt/QQ/resources/app/app_launcher/napcat"
+   mkdir -p "$HOME/Napcat/log" "$HOME/Napcat/run"
+   ```
+
+4. 让 QQ 从宿主机目录加载 NapCat：
+
+   ```bash
+   napcat_dir="$HOME/Napcat/opt/QQ/resources/app/app_launcher/napcat"
+   qq_package="$HOME/Napcat/opt/QQ/resources/app/package.json"
+
+   printf "%s\n" "(async () => {await import('file:///$napcat_dir/napcat.mjs');})();" \
+     > "$HOME/Napcat/opt/QQ/resources/app/loadNapCat.js"
+   jq '.main = "./loadNapCat.js"' "$qq_package" > "$qq_package.tmp"
+   mv "$qq_package.tmp" "$qq_package"
+   ```
+
+5. 校验版本，启动并重新扫码：
+
+   ```bash
+   jq -r '.version' "$HOME/Napcat/opt/QQ/resources/app/package.json"
+   grep -o -m1 '4\.15\.19' \
+     "$HOME/Napcat/opt/QQ/resources/app/app_launcher/napcat/napcat.mjs"
+
+   napcat start <你的QQ号>
+   napcat log <你的QQ号>
+   napcat status <你的QQ号>
+   ```
+
+   前两条版本命令应分别输出 `3.2.21-42086` 和 `4.15.19`；扫码登录后，`napcat status <你的QQ号>` 应能识别正在运行的实例。然后回到 DSH Web 设置页完成 OneBot 配置。
+
+> 保持这套固定组合时，不要执行 `napcat update` 或 `napcat rebuild`，它们会替换 QQ/NapCat 版本。如需升级，先备份 `~/.config/QQ` 和 `~/Napcat`。
 
 
 ### 设置 / setup
@@ -144,6 +234,9 @@ napcat help
 设置页具体说明：
 - 选择 `NapCat / OneBot` 或 `腾讯官方 QQ Bot`。两种不同路径，前者为社区插件连接 QQ，非官方，功能强、限制少、通用性广，但小号容易被强制下线。后者为官方开放平台提供的 Bot，对接更稳，但是功能较少。
 - NapCat 路径需要输入 QQ 号（用于登录在 DSH 服务上、负责接收消息的号）、选择模型、单号/双号模式。单号模式下自己发送消息，自己接收（在 QQ 的好友列表里可以找到自己）。双号模式下两个号互相通信，需要输入发送端 QQ 号。
+- 可勾选“掉线后自动重启并提示扫码”。自动恢复独立监听 NapCat 日志（单号、双号均支持），只处理启用后的新增 `[KickedOffLine]` 下线通知。10 秒后执行 `napcat restart <登录QQ>`，用户打开 NapCat WebUI 或执行 `napcat log <登录QQ>` 查看二维码并扫码。插件不再读取旧版密码设置，启动/重启时会移除继承的密码回退环境变量；不清除 QQ 本地登录数据，仍有效的快速登录可由 NapCat 自行复用。
+- 等待扫码期间不会反复重启。10 分钟最多自动重启一次，每小时最多三次；重启失败时提示检查本机 CLI。扫码后收到 QQ 消息会恢复监控。请勿与旧的 `scripts/keep-napcat-alive.sh` 同时运行。本功能管理本机 NapCat CLI，不管理远程或 Docker 服务。
+- 账号与设备排查及本机证据见 [NapCat 掉线排查记录](docs/napcat-offline-diagnosis.md)。
 - NapCat 路径会检查 `napcat status <QQ>`；目标 QQ 未启动时会先执行 `napcat stop` 顶掉现有 NapCat 实例，再自动执行 `napcat start <QQ>`。用户只需先安装 NapCat CLI，不必手动启动 QQ 后台。
 - NapCat 路径会自动配置 OneBot 正向 WebSocket：`127.0.0.1:3001`。如果尚未找到 OneBot 配置文件，设置页会提示打开 NapCat 日志或执行 `napcat log <QQ>` 扫码登陆；如果配置成功，设置页会提示继续查看日志，确保已经扫码登陆。
 - 官方 QQ Bot 路径会要求先[创建机器人](https://q.qq.com/#/apps)，输入 AppID、AppSecret、沙箱开关，并通过 `pair <code>` 自动配置 `adminOpenId`。
@@ -213,13 +306,10 @@ platform: napcat
 napcat:
   wsUrl: ws://127.0.0.1:3001
   token: "<NapCat OneBot access token>"
-  selfKeepAlive:
-    enabled: true
-    intervalSeconds: 600
-    message: "[dsh-qq-bridge] keepalive"
+
 ```
 
-NapCat 模式默认每 600 秒让登录账号给自己发送一次保活消息。可以在设置页的“保活间隔（秒）”中调整；保活消息会被 bridge 内部过滤，不会触发 Agent。如不需要，可关闭“启用 NapCat 自发消息保活”。旧版 `intervalMs` 配置会自动换算为秒。
+已移除自发消息保活及相关设置，旧版 `selfKeepAlive` 配置不再生效。设置页和重启恢复检测只查询 OneBot 的账号信息和在线状态，不发送 QQ 探测消息；接口返回在线不等同于已经验证消息投递。
 
 每条保活消息都会附带唯一 `uid`。Bridge 最多等待 OneBot 动作响应 2 秒；连续 3 次超时会在 DSH 日志中将 NapCat 登录状态标记为 `logged-out`，任意一次成功则立即标记或恢复为 `logged-in`。
 

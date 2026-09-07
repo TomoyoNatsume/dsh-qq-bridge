@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { WebSocket } from 'ws';
 import { classifyNapcatLogin, classifyNapcatLogPaths, classifyNapcatRuntime, defaultNapcatLogDir, defaultNapcatLogPath, defaultNapcatRootPath, defaultOnebotConfigPath, extractRunningNapcatQqs, tryReadOnebotServer, updateOnebotConfigFile, } from './cli/napcat.js';
 import { napcatCliInstallGuide } from './cli/setup.js';
+import { napcatScanEnv } from './napcat-recovery.js';
 const DEFAULT_ONEBOT_WS_URL = 'ws://127.0.0.1:3001';
 export async function inspectNapcatSettings(options = {}) {
     const base = inspectNapcatRuntimeForSettings(options);
@@ -91,7 +92,14 @@ export async function setupNapcatForSettings(options = {}) {
     if (adminQq === undefined)
         throw new Error('请输入 NapCat 登录 QQ。');
     const status = inspectNapcat(adminQq, rootPath, spawn);
-    const targetWasRunning = status.runtime === 'running';
+    let targetWasRunning = status.runtime === 'running';
+    if (!targetWasRunning) {
+        // A target-specific status can miss a background instance; check the full listing before starting.
+        const background = spawn('napcat', ['status'], { encoding: 'utf8', timeout: 3000 });
+        const runningQqs = parseRunningQqs([background.stdout, background.stderr].filter(Boolean).join('\n'));
+        status.runningQqs = [...new Set([...status.runningQqs, ...runningQqs])];
+        targetWasRunning = status.runningQqs.includes(adminQq);
+    }
     const stoppedQqs = [];
     let started = false;
     if (!targetWasRunning) {
@@ -243,7 +251,7 @@ function napcatCommands(qq) {
     ];
 }
 function startNapcat(qq, spawn) {
-    const result = spawn('napcat', ['start', String(qq)], { encoding: 'utf8', timeout: 15000 });
+    const result = spawn('napcat', ['start', String(qq)], { encoding: 'utf8', timeout: 15000, env: napcatScanEnv() });
     const output = cleanNapcatCommandOutput([result.stdout, result.stderr].filter(Boolean).join('\n'));
     return {
         ok: result.status === 0,
@@ -298,7 +306,7 @@ function isMissingFileError(err) {
     return Boolean(err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT');
 }
 function restartNapcat(qq, spawn) {
-    const result = spawn('napcat', ['restart', String(qq)], { encoding: 'utf8', timeout: 15000 });
+    const result = spawn('napcat', ['restart', String(qq)], { encoding: 'utf8', timeout: 15000, env: napcatScanEnv() });
     const output = cleanNapcatCommandOutput([result.stdout, result.stderr].filter(Boolean).join('\n'));
     return {
         ok: result.status === 0,

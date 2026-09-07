@@ -6,45 +6,23 @@ declare const DshQqBridgeConfig: z.ZodObject<{
     napcat: z.ZodDefault<z.ZodObject<{
         /** NapCat 登录端 QQ；双号模式下与发送端 QQ 不同，仅用于 Web 设置页检测本机 NapCat。 */
         loginQq: z.ZodDefault<z.ZodNumber>;
+        autoRestart: z.ZodDefault<z.ZodBoolean>;
         wsUrl: z.ZodDefault<z.ZodString>;
         token: z.ZodOptional<z.ZodString>;
         /** 连接失败时提示用户查看的安装向导文档路径(给 Agent 的指引)。 */
         guideDoc: z.ZodDefault<z.ZodOptional<z.ZodString>>;
-        /** 定时让 NapCat 登录号给自己发私聊，降低长期无活动时被服务端回收的概率。 */
-        selfKeepAlive: z.ZodDefault<z.ZodEffects<z.ZodObject<{
-            enabled: z.ZodDefault<z.ZodBoolean>;
-            /** 保活发送间隔，单位为秒。 */
-            intervalSeconds: z.ZodDefault<z.ZodNumber>;
-            message: z.ZodDefault<z.ZodString>;
-        }, "strip", z.ZodTypeAny, {
-            enabled: boolean;
-            message: string;
-            intervalSeconds: number;
-        }, {
-            enabled?: boolean | undefined;
-            message?: string | undefined;
-            intervalSeconds?: number | undefined;
-        }>, {
-            enabled: boolean;
-            message: string;
-            intervalSeconds: number;
-        }, unknown>>;
     }, "strip", z.ZodTypeAny, {
         loginQq: number;
+        autoRestart: boolean;
         wsUrl: string;
         guideDoc: string;
-        selfKeepAlive: {
-            enabled: boolean;
-            message: string;
-            intervalSeconds: number;
-        };
         token?: string | undefined;
     }, {
         loginQq?: number | undefined;
+        autoRestart?: boolean | undefined;
         wsUrl?: string | undefined;
         token?: string | undefined;
         guideDoc?: string | undefined;
-        selfKeepAlive?: unknown;
     }>>;
     official: z.ZodDefault<z.ZodObject<{
         /** 腾讯 QQ 机器人开放平台 AppID。 */
@@ -226,13 +204,9 @@ declare const DshQqBridgeConfig: z.ZodObject<{
     enabled: boolean;
     napcat: {
         loginQq: number;
+        autoRestart: boolean;
         wsUrl: string;
         guideDoc: string;
-        selfKeepAlive: {
-            enabled: boolean;
-            message: string;
-            intervalSeconds: number;
-        };
         token?: string | undefined;
     };
     platform: "official" | "napcat";
@@ -284,10 +258,10 @@ declare const DshQqBridgeConfig: z.ZodObject<{
     enabled?: boolean | undefined;
     napcat?: {
         loginQq?: number | undefined;
+        autoRestart?: boolean | undefined;
         wsUrl?: string | undefined;
         token?: string | undefined;
         guideDoc?: string | undefined;
-        selfKeepAlive?: unknown;
     } | undefined;
     platform?: "official" | "napcat" | undefined;
     access?: {
